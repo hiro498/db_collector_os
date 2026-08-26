@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - DB Collector OS{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<div class="cards">
+    <div class="card"><div class="value">{{ db_count }}</div><div class="label">Registered DBs</div></div>
+    <div class="card"><div class="value">{{ active_jobs }}</div><div class="label">Active Jobs</div></div>
+    <div class="card"><div class="value">{{ queued_jobs }}</div><div class="label">Queued</div></div>
+    <div class="card"><div class="value">{{ running_jobs }}</div><div class="label">Running</div></div>
+    <div class="card"><div class="value">{{ completed_jobs }}</div><div class="label">Completed</div></div>
+    <div class="card"><div class="value">{{ failed_jobs }}</div><div class="label">Failed</div></div>
+    <div class="card"><div class="value">{{ review_count }}</div><div class="label">Review Queue</div></div>
+</div>
+
+<h2>Today</h2>
+<div class="cards">
+    <div class="card"><div class="value">{{ today.new_entities }}</div><div class="label">New entities</div></div>
+    <div class="card"><div class="value">{{ today.updated_entities }}</div><div class="label">Updated entities</div></div>
+    <div class="card"><div class="value">{{ today.fetch_success }}</div><div class="label">Fetch success</div></div>
+    <div class="card"><div class="value">{{ today.fetch_errors }}</div><div class="label">Fetch errors</div></div>
+    <div class="card"><div class="value">{{ today.pages_fetched }}</div><div class="label">Pages fetched</div></div>
+    <div class="card"><div class="value">{{ today.jobs_executed }}</div><div class="label">Jobs executed</div></div>
+</div>
+
+<h2>Resources</h2>
+<div class="cards">
+    <div class="card"><div class="value">{{ "%.1f"|format(resources.cpu_percent) }}%</div><div class="label">CPU (max {{ thresholds.cpu_percent_max }}%)</div></div>
+    <div class="card"><div class="value">{{ "%.1f"|format(resources.ram_percent) }}%</div><div class="label">RAM (max {{ thresholds.ram_percent_max }}%)</div></div>
+    <div class="card"><div class="value">{{ "%.1f"|format(resources.disk_percent) }}%</div><div class="label">Disk (max {{ thresholds.disk_percent_max }}%)</div></div>
+    <div class="card"><div class="value">{{ "%.1f"|format(resources.swap_percent) }}%</div><div class="label">Swap (max {{ thresholds.swap_percent_max }}%)</div></div>
+    <div class="card"><div class="value">{{ "%.2f"|format(resources.load_average) }}</div><div class="label">Load avg (max {{ thresholds.load_average_max }})</div></div>
+</div>
+{% endblock %}

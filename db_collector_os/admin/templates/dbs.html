@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}DB List - DB Collector OS{% endblock %}
+{% block content %}
+<h1>Registered DBs</h1>
+<table>
+<thead>
+<tr><th>DB</th><th>Job</th><th>Phase</th><th>Count</th><th>New (today)</th><th>Updated (today)</th><th>Status</th><th>Last run</th><th>Next run</th></tr>
+</thead>
+<tbody>
+{% for row in rows %}
+<tr>
+    <td>{{ row.job.target_db }}</td>
+    <td><a href="/jobs/{{ row.job.job_id }}">{{ row.job.job_name }}</a></td>
+    <td>{{ row.job.phase }}</td>
+    <td>{{ row.count }}</td>
+    <td>{{ row.new_today }}</td>
+    <td>{{ row.updated_today }}</td>
+    <td><span class="badge status-{{ row.job.status }}">{{ row.job.status }}</span></td>
+    <td>{{ row.job.last_finished_at or "-" }}</td>
+    <td>{{ row.job.next_run_at or "-" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="9">No jobs registered yet. Run <code>db-collector jobs sync</code>.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

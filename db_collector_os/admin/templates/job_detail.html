@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ job.job_name }} - DB Collector OS{% endblock %}
+{% block content %}
+{% if not job %}
+<h1>Job not found</h1>
+{% else %}
+<h1>{{ job.job_name }}</h1>
+<p>
+    <span class="badge status-{{ job.status }}">{{ job.status }}</span>
+    phase=<b>{{ job.phase }}</b>
+    collector_type={{ job.collector_type }} adapter={{ job.adapter }}
+    priority={{ job.priority }} schedule={{ job.schedule }}
+</p>
+<form class="inline" method="post" action="/jobs/{{ job.job_id }}/pause"><button type="submit">Pause</button></form>
+<form class="inline" method="post" action="/jobs/{{ job.job_id }}/resume"><button type="submit">Resume</button></form>
+
+<div class="cards">
+    <div class="card"><div class="value">{{ entity_count }}</div><div class="label">Entities</div></div>
+    {% for status, n in candidate_stats.items() %}
+    <div class="card"><div class="value">{{ n }}</div><div class="label">Candidates: {{ status }}</div></div>
+    {% endfor %}
+    {% for status, n in queue_stats.items() %}
+    <div class="card"><div class="value">{{ n }}</div><div class="label">Queue: {{ status }}</div></div>
+    {% endfor %}
+</div>
+
+<h2>Run History</h2>
+<table>
+<thead><tr><th>Run</th><th>Started</th><th>Status</th><th>Discovered</th><th>Fetched</th><th>Inserted</th><th>Updated</th><th>Dup</th><th>Review</th><th>Errors</th><th>Duration(s)</th></tr></thead>
+<tbody>
+{% for r in runs %}
+<tr>
+    <td>{{ r.run_id[:12] }}</td>
+    <td>{{ r.started_at }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.discovered_count }}</td>
+    <td>{{ r.fetched_count }}</td>
+    <td>{{ r.inserted_count }}</td>
+    <td>{{ r.updated_count }}</td>
+    <td>{{ r.duplicate_count }}</td>
+    <td>{{ r.review_count }}</td>
+    <td>{{ r.error_count }}</td>
+    <td>{{ "%.1f"|format(r.duration_seconds) if r.duration_seconds is not none else "-" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="11">No runs yet.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Open Review Items</h2>
+<table>
+<thead><tr><th>ID</th><th>Reason</th><th>Details</th><th>Created</th></tr></thead>
+<tbody>
+{% for item in review_items %}
+<tr><td>{{ item.review_id }}</td><td>{{ item.reason }}</td><td>{{ item.details }}</td><td>{{ item.created_at }}</td></tr>
+{% else %}
+<tr><td colspan="4">No open review items for this job.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% endblock %}

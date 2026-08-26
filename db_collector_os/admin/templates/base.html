@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}DB Collector OS{% endblock %}</title>
+    <style>
+        :root { color-scheme: light dark; }
+        body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
+        header { background: #16213e; color: #fff; padding: 0.75rem 1.5rem; display: flex; gap: 1.5rem; align-items: center; }
+        header a { color: #cfd8ff; text-decoration: none; font-size: 0.95rem; }
+        header a:hover { color: #fff; }
+        header .brand { font-weight: 700; font-size: 1.05rem; color: #fff; }
+        main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .card { background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .card .value { font-size: 1.6rem; font-weight: 700; }
+        .card .label { font-size: 0.8rem; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { background: #eef0f5; font-weight: 600; }
+        tr:last-child td { border-bottom: none; }
+        h1, h2 { font-weight: 600; }
+        h1 { font-size: 1.4rem; }
+        h2 { font-size: 1.1rem; margin-top: 2rem; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.78rem; background: #eee; }
+        .badge.status-running { background: #dbeafe; color: #1e40af; }
+        .badge.status-completed { background: #dcfce7; color: #166534; }
+        .badge.status-failed { background: #fee2e2; color: #991b1b; }
+        .badge.status-queued { background: #fef9c3; color: #854d0e; }
+        .badge.status-paused { background: #f3f4f6; color: #4b5563; }
+        form.inline { display: inline; }
+        button { cursor: pointer; border: none; background: #16213e; color: #fff; padding: 0.35rem 0.8rem; border-radius: 4px; font-size: 0.85rem; }
+        button:hover { background: #0f1730; }
+    </style>
+</head>
+<body>
+<header>
+    <span class="brand">DB Collector OS</span>
+    <a href="/">Dashboard</a>
+    <a href="/dbs">DBs</a>
+    <a href="/review">Review Queue</a>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

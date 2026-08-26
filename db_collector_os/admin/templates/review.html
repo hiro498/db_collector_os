@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Review Queue - DB Collector OS{% endblock %}
+{% block content %}
+<h1>Review Queue ({{ items|length }} open)</h1>
+<table>
+<thead><tr><th>ID</th><th>Job</th><th>Reason</th><th>Details</th><th>Created</th><th></th></tr></thead>
+<tbody>
+{% for item in items %}
+<tr>
+    <td>{{ item.review_id }}</td>
+    <td><a href="/jobs/{{ item.job_id }}">{{ item.job_id[:12] }}</a></td>
+    <td>{{ item.reason }}</td>
+    <td>{{ item.details }}</td>
+    <td>{{ item.created_at }}</td>
+    <td>
+        <form class="inline" method="post" action="/review/{{ item.review_id }}/resolve"><button type="submit">Resolve</button></form>
+        <form class="inline" method="post" action="/review/{{ item.review_id }}/dismiss"><button type="submit">Dismiss</button></form>
+    </td>
+</tr>
+{% else %}
+<tr><td colspan="6">Nothing needs review right now.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}
