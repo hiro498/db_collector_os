@@ -1,0 +1,6 @@
+{
+    "items": [
+        {"id": "P-001", "name": "Widget Alpha", "url": "https://api.example.com/products/P-001", "price": 9.99},
+        {"id": "P-002", "name": "Widget Beta", "url": "https://api.example.com/products/P-002", "price": 14.99}
+    ]
+}
