@@ -19,7 +19,7 @@ KillMode=mixed
 
 NoNewPrivileges=true
 ProtectSystem=full
-ProtectHome=true
+ProtectHome=false
 ReadWritePaths=/root/tools/db_collector_os
 
 StandardOutput=journal
