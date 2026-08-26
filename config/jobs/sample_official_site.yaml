@@ -1,0 +1,33 @@
+# Sample job: official_site collector type.
+# Safe to sync into the registry; it will not fetch anything until you run it
+# and point seed_urls at a real site (or run tests, which mock all HTTP).
+job_id: "job_sample_official_site"
+job_name: "Sample Official Site (Products)"
+category: "product"
+target_db: "sample_products"
+target_table: "entities"
+collector_type: "official_site"
+adapter: "sample_official_site"
+priority: 50
+enabled: false          # flip to true once seed_urls point at a real site
+schedule: "@hourly"
+max_pages: 50
+max_depth: 3
+concurrency: 2
+rate_limit: 2.0          # seconds between requests to the same domain
+config:
+  seed_urls:
+    - "https://example.com/products/"
+  discovery:
+    robots_seed_urls:
+      - "https://example.com/"
+    internal_links: true
+    related_entities: true
+    allowed_domains:
+      - "example.com"
+  phase1_conditions:
+    queue_empty: true
+    require_discovery_saturation: true
+    consecutive_low_discovery_runs: 3
+    max_error_rate: 0.5
+  incremental_revalidate_after_seconds: 86400

@@ -1,0 +1,25 @@
+# Sample job: api collector type (JSON catalog/product APIs).
+job_id: "job_sample_api"
+job_name: "Sample API Catalog"
+category: "product"
+target_db: "sample_api_products"
+target_table: "entities"
+collector_type: "api"
+adapter: "sample_api"
+priority: 60
+enabled: false
+schedule: "@hourly"
+max_pages: 20
+max_depth: 1
+concurrency: 2
+rate_limit: 1.0
+config:
+  seed_urls:
+    - "https://api.example.com/v1/products?page=1"
+  discovery:
+    internal_links: false
+    related_entities: false
+  phase1_conditions:
+    queue_empty: true
+    require_discovery_saturation: false
+  incremental_revalidate_after_seconds: 3600

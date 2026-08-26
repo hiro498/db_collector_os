@@ -1,0 +1,30 @@
+# Sample job: person collector type (public-figure directories).
+job_id: "job_sample_person"
+job_name: "Sample Person Directory"
+category: "person"
+target_db: "sample_people"
+target_table: "entities"
+collector_type: "person"
+adapter: "sample_person"
+priority: 40
+enabled: false
+schedule: "@daily"
+max_pages: 50
+max_depth: 3
+concurrency: 2
+rate_limit: 2.0
+config:
+  seed_urls:
+    - "https://example.com/profiles/"
+  discovery:
+    robots_seed_urls:
+      - "https://example.com/"
+    internal_links: true
+    related_entities: true
+    allowed_domains:
+      - "example.com"
+  phase1_conditions:
+    queue_empty: true
+    require_discovery_saturation: true
+    consecutive_low_discovery_runs: 3
+  incremental_revalidate_after_seconds: 259200

@@ -1,0 +1,30 @@
+# DB Collector OS - default configuration.
+# Values here can be overridden by environment variables (see .env.example).
+
+home_dir: "./var"
+db_path: "db_collector.sqlite3"
+
+admin_host: "127.0.0.1"
+admin_port: 8787
+
+user_agent: "DBCollectorOS/0.1 (+https://github.com/hiro498/db_collector_os)"
+
+# Leave blank to disable search-query discovery (the rest of the system
+# keeps working -- see discovery/search_provider.py).
+search_provider: ""
+search_api_key: ""
+
+log_level: "INFO"
+
+scheduler_interval_seconds: 15
+worker_poll_interval_seconds: 5
+worker_heartbeat_seconds: 10
+worker_stale_seconds: 300
+
+resource_thresholds:
+  cpu_percent_max: 85
+  ram_percent_max: 85
+  swap_percent_max: 50
+  disk_percent_max: 90
+  load_average_max: 4.0
+  check_interval_seconds: 15

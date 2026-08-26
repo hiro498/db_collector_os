@@ -1,0 +1,31 @@
+# Sample job: local_business collector type (storefront/venue directories).
+job_id: "job_sample_local_business"
+job_name: "Sample Local Business Directory"
+category: "local_business"
+target_db: "sample_local_businesses"
+target_table: "entities"
+collector_type: "local_business"
+adapter: "sample_local_business"
+priority: 50
+enabled: false
+schedule: "@hourly"
+max_pages: 50
+max_depth: 3
+concurrency: 2
+rate_limit: 2.0
+config:
+  seed_urls:
+    - "https://example.com/directory/"
+  discovery:
+    robots_seed_urls:
+      - "https://example.com/"
+    prefecture_url_template: "https://example.com/area/{pref}/"
+    internal_links: true
+    related_entities: false
+    allowed_domains:
+      - "example.com"
+  phase1_conditions:
+    queue_empty: true
+    require_discovery_saturation: true
+    consecutive_low_discovery_runs: 3
+  incremental_revalidate_after_seconds: 172800
