@@ -1,0 +1,30 @@
+[Unit]
+Description=DB Collector OS - Worker %i
+Documentation=https://github.com/hiro498/db_collector_os
+After=network-online.target db-collector-scheduler.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/tools/db_collector_os
+EnvironmentFile=-/root/tools/db_collector_os/.env
+Environment=DB_COLLECTOR_WORKER_ID=worker-%i
+ExecStart=/root/tools/db_collector_os/.venv/bin/db-collector worker run
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=mixed
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/root/tools/db_collector_os
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=db-collector-worker-%i
+
+[Install]
+WantedBy=multi-user.target

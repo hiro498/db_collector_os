@@ -1,0 +1,32 @@
+[Unit]
+Description=DB Collector OS - Admin UI
+Documentation=https://github.com/hiro498/db_collector_os
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/tools/db_collector_os
+EnvironmentFile=-/root/tools/db_collector_os/.env
+# Binds to DB_COLLECTOR_ADMIN_HOST (default 127.0.0.1) -- see README "Admin UI"
+# for how to expose this safely from outside the VPS (SSH tunnel or an
+# authenticating reverse proxy). Do not change this to 0.0.0.0 without auth
+# in front of it.
+ExecStart=/root/tools/db_collector_os/.venv/bin/db-collector admin serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/root/tools/db_collector_os
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=db-collector-admin
+
+[Install]
+WantedBy=multi-user.target
