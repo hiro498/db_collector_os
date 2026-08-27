@@ -1,49 +1,41 @@
-# PRODUCTION job #1: 美少女フィギュア公式メーカーDB (bishoujo figure official
-# manufacturer product DB). See docs/first_production_db.md for the full
-# selection rationale and operating notes.
+# PRODUCTION job #1: 美少女フィギュア公式メーカーDB
+# First real source: Good Smile Company official product page.
 #
-# This is a SEPARATE job/id from the sample_official_site job -- it is not a
-# copy-and-flip of the sample. `enabled` is left false on purpose: this file
-# ships with placeholder seed_urls (schema.org-standard structure is well
-# defined, but no specific manufacturer site was verified from this
-# environment -- outbound web access is not available here). Before enabling
-# on the VPS:
-#   1. Pick one specific official figure-manufacturer site.
-#   2. Replace every "REPLACE_ME" URL below with real ones for that site
-#      (check its robots.txt / terms of use first).
-#   3. Flip `enabled: true` (or `db-collector jobs resume job_prod_figure_official_site`).
-#   4. `db-collector jobs sync` (or let install_vps.sh/update_vps.sh do it).
+# Initial production proof is intentionally limited to ONE verified official
+# product page. After entity/evidence/checkpoint/review validation succeeds,
+# expand discovery in a separate follow-up change.
 job_id: "job_prod_figure_official_site"
-job_name: "Figure Official Site (Production #1)"
+job_name: "Figure Official Site (Production #1 - Good Smile)"
 category: "figure"
 target_db: "figure_official_site"
 target_table: "entities"
 collector_type: "official_site"
 adapter: "figure_official_site"
 priority: 50
-enabled: false             # flip only after seed_urls point at a real, robots-permitting site
-schedule: "@daily"          # a manufacturer catalog changes slowly; no need for @hourly
-max_pages: 30                # deliberately small for the first real Phase 1 run
-max_depth: 3
-concurrency: 1                # one fetch at a time -- conservative for a first production job
-rate_limit: 3.0                # seconds between requests to the same domain (conservative)
+# Keep disabled in Git. VPS activation enables the registry only after the
+# Resource Controller admits a new job.
+enabled: false
+schedule: "@daily"
+# First production proof: exactly one known official Product JSON-LD page.
+max_pages: 1
+max_depth: 0
+concurrency: 1
+rate_limit: 5.0
 config:
   seed_urls:
-    - "https://REPLACE_ME.example/figures/"          # a category/listing page is a fine seed
+    - "https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono"
   discovery:
-    sitemap_urls:
-      - "https://REPLACE_ME.example/sitemap.xml"      # prefer this if the site publishes one
+    sitemap_urls: []
     robots_seed_urls:
-      - "https://REPLACE_ME.example/"                  # picks up any Sitemap: directive too
-    internal_links: true
-    related_entities: true
+      - "https://www.goodsmile.com/"
+    internal_links: false
+    related_entities: false
     allowed_domains:
-      - "REPLACE_ME.example"
+      - "www.goodsmile.com"
   phase1_conditions:
     queue_empty: true
-    require_discovery_saturation: true
-    consecutive_low_discovery_runs: 3
+    require_discovery_saturation: false
+    consecutive_low_discovery_runs: 1
     max_error_rate: 0.5
     min_entity_count: 1
-  # A manufacturer catalog rarely changes hour to hour; revalidate weekly.
   incremental_revalidate_after_seconds: 604800
