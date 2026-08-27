@@ -1,20 +1,28 @@
 # PRODUCTION job #1: 美少女フィギュア公式メーカーDB
-# Source: Good Smile Company official product pages.
+# Source: Good Smile Company official site (www.goodsmile.com).
 #
 # History:
 #   - Single-product production proof (1 known URL, max_pages=1): PASSED --
-#     entity_count=1, evidence_count=13, run_errors=0, open_reviews=0.
-#     Two bugs found from that run were fixed separately (HTML entity
-#     decoding in JSON-LD; run_history not being finished by `jobs run`).
-#   - This revision expands to Phase 1 batch #1: discovery via internal
-#     links from the one verified real product page (see
-#     docs/first_production_db.md "Phase 1 discovery method" for why --
-#     no listing/category/sitemap URL was guessed).
+#     entity_count=1, evidence_count=13, run_errors=0, open_reviews=0. Two
+#     bugs found from that run were fixed separately (HTML entity decoding
+#     in JSON-LD; run_history not being finished by `jobs run`).
+#   - First Phase 1 batch #1 revision seeded from that single product page
+#     via internal_links (no listing page was known/verified yet).
+#   - This revision: the user confirmed a real, existing entry point --
+#     https://www.goodsmile.com/en/scalefigure_list (the official "Scale
+#     Figure Reference List") -- and that it mixes multiple manufacturers/
+#     brands (Good Smile Company, Max Factory, ...). That page is now the
+#     primary seed. See docs/first_production_db.md "Phase 1 discovery
+#     method" for the full reasoning, including why pagination discovery
+#     was deliberately NOT implemented (this environment has no outbound
+#     web access to verify the real pagination mechanism -- only the
+#     listing page's own embedded links, whatever they are, get followed;
+#     nothing was guessed).
 #
 # robots.txt (confirmed): "User-agent: *\nDisallow: /*/search". This job
-# never uses search-based discovery and internal_links only ever follows
-# links found on already-fetched www.goodsmile.com pages, so it never visits
-# a disallowed path.
+# never uses search-based discovery, and `discovery.product_url_pattern`
+# below scopes internal_links to product-detail and scalefigure_list URLs
+# only -- it structurally cannot enqueue a /search path.
 job_id: "job_prod_figure_official_site"
 job_name: "Figure Official Site (Production #1 - Good Smile)"
 category: "figure"
@@ -23,13 +31,13 @@ target_table: "entities"
 collector_type: "official_site"
 adapter: "figure_official_site"
 priority: 50
-# Keep disabled in Git. The VPS activation script enables the registry row
+# Keep disabled in Git. The VPS batch script enables the registry row
 # directly (db-collector jobs enable/resume) only after preflight checks
 # pass -- this file stays enabled: false regardless.
 enabled: false
 schedule: "@daily"
 # Phase 1 batch #1: conservative, bounded expansion from the one verified
-# product page. 30/1/5.0 match the task's suggested starting point; kept
+# listing page. 30/1/5.0 match the task's suggested starting point; kept
 # rather than tuned tighter/looser since this environment has no outbound
 # web access to verify the real catalog's size or server behavior (see
 # docs/first_production_db.md) -- these are safe defaults, not a guess.
@@ -39,6 +47,9 @@ concurrency: 1
 rate_limit: 5.0
 config:
   seed_urls:
+    - "https://www.goodsmile.com/en/scalefigure_list"
+    # Kept as a second seed: the one page-level proof this job has actually
+    # completed successfully end to end.
     - "https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono"
   discovery:
     sitemap_urls: []
@@ -48,6 +59,15 @@ config:
     related_entities: true
     allowed_domains:
       - "www.goodsmile.com"
+    # Scopes internal_links to (a) product detail URLs -- capture group 1 is
+    # the numeric product ID, used to dedup two different URLs (different
+    # slug) for the same product before either is even fetched -- and
+    # (b) the scalefigure_list page itself, so if it paginates via a
+    # same-path link (e.g. a "next page" href), that link is still
+    # followed. Pattern derived from the one confirmed real product URL
+    # above (/en/product/<id>/<slug>) and the confirmed real listing URL --
+    # not a guess. See discovery/internal_links.py.
+    product_url_pattern: "/en/product/(\\d+)/|/en/scalefigure_list"
   phase1_conditions:
     queue_empty: true
     require_discovery_saturation: true

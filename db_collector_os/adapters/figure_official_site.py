@@ -19,9 +19,11 @@ Design notes (see docs/first_production_db.md for the full rationale):
   that is a real data-quality problem worth a human's attention.
 - External identifier preference order (used for dedup fingerprinting via
   the existing Deduplicator): GTIN (13/12/14/8) > MPN > SKU > a site's own
-  `product_master_code` (see below). GTIN is the closest thing to a
-  universal, cross-retailer stable product identifier; SKU/product code
-  alone are only guaranteed unique within one manufacturer's own site.
+  `product_master_code` > a page's dataLayer `item_id` (see below). GTIN is
+  the closest thing to a universal, cross-retailer stable product
+  identifier; the site-specific IDs are only guaranteed unique within one
+  manufacturer's own site, and are kept in their own `fields` entries
+  (never merged into `sku`/`mpn`/`gtin`) so their provenance stays clear.
 - schema.org `Product` JSON-LD is always the primary/authoritative source.
   Where a field it would normally carry is missing, this adapter falls
   back to the page's `dataLayer` (GA4 Enhanced Ecommerce convention --
@@ -65,7 +67,12 @@ class FigureOfficialSiteAdapter(Adapter):
         # found on the page. Never overrides a JSON-LD-derived value.
         dl = _merge_data_layer_items(extract_data_layer_items(raw_html or ""))
 
-        name = _clean_str(product_block.get("name")) or common.get("name") or _clean_str(dl.get("item_name"))
+        name = (
+            _clean_str(product_block.get("name"))
+            or common.get("name")
+            or _clean_str(dl.get("item_name"))
+            or _clean_str(dl.get("product_name"))
+        )
 
         brand_obj = product_block.get("brand")
         brand = _clean_str(brand_obj.get("name")) if isinstance(brand_obj, dict) else _clean_str(brand_obj)
@@ -90,7 +97,8 @@ class FigureOfficialSiteAdapter(Adapter):
         mpn = _clean_str(product_block.get("mpn"))
         gtin = next((_clean_str(product_block.get(k)) for k in _GTIN_KEYS if _clean_str(product_block.get(k))), None)
         product_master_code = _clean_str(dl.get("product_master_code"))
-        external_id = gtin or mpn or sku or product_master_code
+        item_id = _clean_str(dl.get("item_id"))
+        external_id = gtin or mpn or sku or product_master_code or item_id
 
         offers = product_block.get("offers")
         if isinstance(offers, list):
@@ -130,6 +138,7 @@ class FigureOfficialSiteAdapter(Adapter):
                 "mpn": mpn,
                 "gtin": gtin,
                 "product_master_code": product_master_code,
+                "item_id": item_id,
                 "price": price,
                 "currency": currency,
                 "availability": availability,

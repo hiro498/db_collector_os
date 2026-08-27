@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Scale Figures | Good Smile Company</title>
+    <link rel="canonical" href="https://www.goodsmile.com/en/scalefigure_list">
+    <!--
+      Realistic reconstruction of Good Smile's "Scale Figure Reference List"
+      page, NOT a live scrape: this environment has no outbound web access
+      to www.goodsmile.com (confirmed blocked -- see
+      docs/first_production_db.md "Phase 1 discovery method"). Shape is
+      based on facts already confirmed real: the seed URL itself, the one
+      known real product page's URL pattern (/en/product/<id>/<slug>), and
+      the site mixing multiple manufacturers/brands on one listing page
+      (Good Smile Company, Max Factory, ...). No JSON-LD Product block on
+      this page -- it's a listing, not a product -- so the adapter must
+      classify it as skip=True while still surfacing its product links for
+      discovery.
+    -->
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="https://www.goodsmile.com/en/">Home</a>
+            <a href="https://www.goodsmile.com/en/about">About Us</a>
+            <a href="https://www.goodsmile.com/en/contact">Contact</a>
+            <a href="https://www.goodsmile.com/en/cart">Cart</a>
+            <a href="https://www.goodsmile.com/en/account">My Account</a>
+            <a href="https://www.goodsmile.com/en/search?q=figure">Search</a>
+        </nav>
+    </header>
+
+    <h1>Scale Figures</h1>
+    <p>Browse the reference list of scale figures from Good Smile Company, Max Factory, and other official brands.</p>
+
+    <ul class="product-list">
+        <li>
+            <a href="https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono">
+                Rikka Takarada &amp; Akane Shinjo feat. toridamono (Good Smile Company)
+            </a>
+        </li>
+        <li>
+            <!-- same product, alternate slug -- must dedup to the same candidate as the link above -->
+            <a href="https://www.goodsmile.com/en/product/1141716/rikka-akane-alt-slug">
+                Rikka Takarada &amp; Akane Shinjo feat. toridamono (alternate link)
+            </a>
+        </li>
+        <li>
+            <a href="https://www.goodsmile.com/en/product/2200481/Nendoroid%2BSample%2BFigure">
+                Nendoroid Sample Figure (Good Smile Company)
+            </a>
+        </li>
+        <li>
+            <a href="https://www.goodsmile.com/en/product/3301592/POP%2BUP%2BPARADE%2BSample">
+                POP UP PARADE Sample (Good Smile Company)
+            </a>
+        </li>
+        <li>
+            <a href="https://www.goodsmile.com/en/product/4402703/figma%2BSample%2BFigure">
+                figma Sample Figure (Max Factory)
+            </a>
+        </li>
+        <li>
+            <a href="https://www.goodsmile.com/en/product/5503814/Max%2BFactory%2BScale%2BSample">
+                Max Factory Scale Sample (Max Factory)
+            </a>
+        </li>
+    </ul>
+
+    <nav class="pagination">
+        <a href="https://www.goodsmile.com/en/scalefigure_list?page=2">Next &raquo;</a>
+    </nav>
+
+    <footer>
+        <a href="https://www.goodsmile.com/en/privacy">Privacy Policy</a>
+        <a href="https://not-goodsmile.example.com/en/product/9999999/off-domain">Off-domain link (must be excluded)</a>
+    </footer>
+</body>
+</html>

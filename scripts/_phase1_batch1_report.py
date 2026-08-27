@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Internal helper for scripts/phase1_batch1_goodsmile.sh: prints a full
+"""Internal helper for scripts/run_goodsmile_phase1_batch1.sh: prints a full
 Phase 1 batch report for one job as plain text (entity/evidence counts,
 run_history, fetch_queue status + HTTP status breakdown, candidates,
-review queue, checkpoint) plus two machine-parseable summary lines the
-calling shell script uses to decide anomaly vs. success.
+review queue, checkpoint) plus machine-parseable summary lines the calling
+shell script uses to decide anomaly vs. success.
 
 Not meant for interactive use -- `db-collector jobs show`/`queue`/`review`
 already cover ad-hoc inspection; this exists so the batch watcher script
@@ -86,6 +86,24 @@ def main() -> int:
     print(CheckpointStore(db).load(job_id))
 
     print()
+    print("--- batch totals (sum of run_history across every run this job has had) ---")
+    totals = db.query_one(
+        "SELECT COALESCE(SUM(fetched_count),0) AS fetched, COALESCE(SUM(inserted_count),0) AS inserted, "
+        "COALESCE(SUM(updated_count),0) AS updated, COALESCE(SUM(duplicate_count),0) AS duplicates, "
+        "COALESCE(SUM(review_count),0) AS reviews, COALESCE(SUM(error_count),0) AS errors, "
+        "COUNT(*) AS n_runs "
+        "FROM run_history WHERE job_id=?",
+        (job_id,),
+    )
+    print(f"FETCHED={totals['fetched']}")
+    print(f"INSERTED={totals['inserted']}")
+    print(f"UPDATED={totals['updated']}")
+    print(f"DUPLICATES={totals['duplicates']}")
+    print(f"REVIEWS={totals['reviews']}")
+    print(f"ERRORS={totals['errors']}")
+    print(f"NEW_ENTITIES={totals['inserted']}")
+
+    print()
     print("--- summary (machine-parsed by the calling shell script) ---")
     latest_run = db.query_one(
         "SELECT error_count, status AS run_status FROM run_history WHERE job_id=? "
@@ -96,6 +114,9 @@ def main() -> int:
     print(f"LATEST_RUN_STATUS={latest_run['run_status'] if latest_run else 'none'}")
     print(f"OPEN_REVIEW_COUNT={n_open_review}")
     print(f"ENTITY_COUNT={n_entities}")
+    print(f"BATCH_FETCHED={totals['fetched']}")
+    print(f"BATCH_INSERTED={totals['inserted']}")
+    print(f"BATCH_ERRORS={totals['errors']}")
 
     db.close()
     return 0

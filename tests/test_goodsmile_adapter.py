@@ -167,6 +167,64 @@ def test_duplicate_across_pages_shares_fingerprint_via_sku():
     assert fp1 == fp2
 
 
+def test_item_id_and_product_name_datalayer_fallbacks():
+    """item_id and product_name (both confirmed present on the real page's
+    dataLayer, alongside item_name/item_brand/etc.) must be usable as a
+    last-resort external_id/name fallback -- previously observed but unused.
+    """
+    html = """
+    <html><head><meta charset="utf-8">
+    <script type="application/ld+json">
+    {"@type": "Product"}
+    </script>
+    <script>
+    dataLayer.push({"ecommerce": {"items": [{"item_id": "9999999"}]}, "product_name": "Fallback Name Figure"});
+    </script>
+    </head><body></body></html>
+    """
+    adapter = get_adapter("figure_official_site")
+    common = extract_common(html, "https://example.com/p")
+    record = adapter.extract(common, "https://example.com/p", html)
+    assert record.name == "Fallback Name Figure"
+    assert record.external_id == "9999999"
+    assert record.fields["item_id"] == "9999999"
+    # site-specific IDs stay in their own fields, never merged into sku/mpn/gtin:
+    assert record.fields["sku"] is None
+    assert record.fields["mpn"] is None
+    assert record.fields["gtin"] is None
+
+
+def test_brand_and_manufacturer_are_never_hardcoded_to_good_smile():
+    """Good Smile's Scale Figure list mixes multiple manufacturers/brands
+    (Good Smile Company, Max Factory, ...) -- the adapter must report each
+    page's own brand/manufacturer, not a fixed value.
+    """
+    def page(brand: str) -> str:
+        return f"""
+        <html><head><meta charset="utf-8">
+        <script type="application/ld+json">
+        {{"@type": "Product", "name": "Some Figure", "brand": {{"@type": "Brand", "name": "{brand}"}}}}
+        </script>
+        </head><body></body></html>
+        """
+
+    adapter = get_adapter("figure_official_site")
+
+    html_gsc = page("Good Smile Company")
+    common_gsc = extract_common(html_gsc, "https://example.com/a")
+    record_gsc = adapter.extract(common_gsc, "https://example.com/a", html_gsc)
+    assert record_gsc.fields["brand"] == "Good Smile Company"
+
+    html_mf = page("Max Factory")
+    common_mf = extract_common(html_mf, "https://example.com/b")
+    record_mf = adapter.extract(common_mf, "https://example.com/b", html_mf)
+    assert record_mf.fields["brand"] == "Max Factory"
+
+    # source domain (tracked separately by the pipeline via fetch_queue's
+    # domain, not by this adapter) stays goodsmile.com for both regardless
+    # of which manufacturer/brand the product itself belongs to.
+
+
 def test_missing_optional_fields_do_not_count_as_failure():
     """Only `name` is required -- every other field may legitimately be NULL
     without the record being treated as a failed extraction.

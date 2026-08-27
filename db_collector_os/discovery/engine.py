@@ -86,8 +86,9 @@ class DiscoveryEngine:
 
         if discovery_cfg.get("internal_links", True):
             allowed = set(discovery_cfg.get("allowed_domains", [])) or {page_domain}
+            url_pattern = discovery_cfg.get("product_url_pattern")
             found.extend(
-                self._safe(discover_internal_links, extracted.get("links", []), page_domain, allowed)
+                self._safe(discover_internal_links, extracted.get("links", []), page_domain, allowed, url_pattern)
             )
 
         if discovery_cfg.get("related_entities", True):
@@ -108,6 +109,12 @@ class DiscoveryEngine:
             url = normalize_url(item.url)
             if not url:
                 continue
+            # A stable_id (e.g. a numeric product ID captured from the URL)
+            # fingerprints candidates by real-world identity rather than by
+            # URL, so two different URLs for the same product (different
+            # slug, tracking params, ...) collapse into one candidate before
+            # either is ever fetched -- see discovery/internal_links.py.
+            fingerprint = f"{entity_type}:{item.stable_id}" if item.stable_id else url
             self.candidates.add(
                 job_id=job["job_id"],
                 entity_type=entity_type,
@@ -116,7 +123,7 @@ class DiscoveryEngine:
                 url=url,
                 source_url=url,
                 discovery_method=item.method,
-                fingerprint=url,
+                fingerprint=fingerprint,
                 confidence=item.confidence,
             )
         return found

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # DB Collector OS - Phase 1 batch #1 for the first production DB
 # (job_prod_figure_official_site / 美少女フィギュア公式メーカーDB, Good Smile
-# Company source).
+# Company source: https://www.goodsmile.com/en/scalefigure_list).
 #
 # Paste this whole file into your VPS SSH session, or run it as
-# `./scripts/phase1_batch1_goodsmile.sh` from /root/tools/db_collector_os.
+# `./scripts/run_goodsmile_phase1_batch1.sh` from /root/tools/db_collector_os.
 # Either way is safe: everything runs inside one function, and nothing in
 # this script ever calls `exit`, `logout`, `reboot`, `shutdown`, or
 # otherwise touches your shell session.
@@ -23,14 +23,22 @@
 #     unit rather than accumulating new ones (see the note on inotify watch
 #     descriptor exhaustion from creating many transient units).
 #
+# This script never touches swap, resource_controller thresholds, or any
+# other host-level resource configuration -- it only ever *reads* current
+# resource state via the existing ResourceController gate, exactly like the
+# Scheduler does for every other job.
+#
 # Safe to re-run any time.
 
 db_collector_phase1_batch1_goodsmile() {
     local APP_DIR="${DB_COLLECTOR_APP_DIR:-/root/tools/db_collector_os}"
     local JOB_ID="job_prod_figure_official_site"
     local JOB_YAML="config/jobs/prod_figure_official_site.yaml"
-    local SEED_URL="https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono"
+    local LIST_URL="https://www.goodsmile.com/en/scalefigure_list"
+    local PRODUCT_URL="https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono"
     local WATCH_UNIT="db-collector-phase1-batch1-goodsmile"
+    local ADMIN_PORT="${DB_COLLECTOR_ADMIN_PORT:-8787}"
+    local SAMPLE_JOB_IDS="job_sample_official_site job_sample_local_business job_sample_person job_sample_api"
     local SKIP_START=0
 
     echo "===================================================================="
@@ -46,8 +54,8 @@ db_collector_phase1_batch1_goodsmile() {
     local PY="$APP_DIR/.venv/bin/python"
     [ -x "$CLI" ] || { echo "[FATAL] $CLI not found -- run scripts/install_vps.sh first"; return 1 2>/dev/null || true; }
 
-    # -- git status (clean working tree) ------------------------------------
-    echo; echo "--- preflight: git status ---"
+    # -- git: clean working tree ----------------------------------------------
+    echo; echo "--- preflight: git (clean working tree) ---"
     local DIRTY
     DIRTY="$(git status --short 2>/dev/null)"
     if [ -n "$DIRTY" ]; then
@@ -59,8 +67,8 @@ db_collector_phase1_batch1_goodsmile() {
         echo "OK: working tree clean"
     fi
 
-    # -- HEAD / origin drift check -------------------------------------------
-    echo; echo "--- preflight: HEAD vs origin ---"
+    # -- git: fetch + ff-only + HEAD vs origin --------------------------------
+    echo; echo "--- preflight: git fetch / ff-only / HEAD vs origin ---"
     local BRANCH; BRANCH="$(git branch --show-current 2>/dev/null || true)"
     if git fetch origin "$BRANCH" 2>&1; then
         local LOCAL_HEAD REMOTE_HEAD
@@ -77,11 +85,15 @@ db_collector_phase1_batch1_goodsmile() {
         echo "[WARN] git fetch failed (network?) -- could not verify drift; proceeding with caution"
     fi
 
-    # -- DB integrity ---------------------------------------------------------
+    # -- DB backup --------------------------------------------------------------
+    echo; echo "--- preflight: DB backup ---"
+    ./scripts/backup.sh || { echo "[BLOCK] backup failed"; SKIP_START=1; }
+
+    # -- DB integrity -----------------------------------------------------------
     echo; echo "--- preflight: DB integrity ---"
     "$CLI" integrity || { echo "[BLOCK] integrity check failed"; SKIP_START=1; }
 
-    # -- services active --------------------------------------------------------
+    # -- services active ----------------------------------------------------------
     echo; echo "--- preflight: services active ---"
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         for svc in db-collector-scheduler.service db-collector-worker@1.service db-collector-admin.service; do
@@ -96,8 +108,23 @@ db_collector_phase1_batch1_goodsmile() {
         echo "[WARN] systemd not available in this shell context -- cannot verify services are active"
     fi
 
-    # -- resource gate (the existing Resource Controller -- the SAME gate ---
-    # -- the Scheduler itself uses) --------------------------------------------
+    # -- Admin HTTP 200 -----------------------------------------------------------
+    echo; echo "--- preflight: Admin UI HTTP 200 ---"
+    if command -v curl >/dev/null 2>&1; then
+        local ADMIN_CODE
+        ADMIN_CODE="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${ADMIN_PORT}/" 2>/dev/null)"
+        if [ "$ADMIN_CODE" = "200" ]; then
+            echo "OK: Admin UI http://127.0.0.1:${ADMIN_PORT}/ -> 200"
+        else
+            echo "[BLOCK] Admin UI http://127.0.0.1:${ADMIN_PORT}/ -> ${ADMIN_CODE:-no response}"
+            SKIP_START=1
+        fi
+    else
+        echo "[WARN] curl not available -- cannot verify Admin UI"
+    fi
+
+    # -- resource gate (reads the existing Resource Controller only -- never ---
+    # -- modifies swap, thresholds, or any host resource configuration) --------
     echo; echo "--- preflight: resource gate ---"
     if "$PY" -c "
 from db_collector_os.config import load_config
@@ -110,11 +137,12 @@ print(f'cpu={snap.cpu_percent:.1f}% ram={snap.ram_percent:.1f}% swap={snap.swap_
 print('can_admit_new_job:', ok, '-', reason)
 raise SystemExit(0 if ok else 1)
 "; then
-        echo "OK: resource controller allows new job admission right now"
+        echo "OK: resource controller allows new job admission right now (RESOURCE_GATE=PASS)"
     else
-        echo "[BLOCK] resource controller currently says NO to new job admission."
+        echo "[BLOCK] resource controller currently says NO to new job admission (RESOURCE_GATE=FAIL)."
         echo "        Not starting Phase 1 batch #1 now; already-running jobs are left alone."
-        echo "        Re-run this script once load has come down -- it is safe to re-run."
+        echo "        This script does not touch swap or Resource Controller thresholds --"
+        echo "        re-run once load has come down on its own; it is safe to re-run."
         SKIP_START=1
     fi
 
@@ -128,45 +156,64 @@ raise SystemExit(0 if ok else 1)
         if "$PY" -c "
 from db_collector_os.fetching.robots import RobotsCache
 rc = RobotsCache(user_agent='DBCollectorOS/0.1 (+https://github.com/hiro498/db_collector_os)')
-seed_ok = rc.can_fetch('$SEED_URL')
-root_ok = rc.can_fetch('https://www.goodsmile.com/')
-print('seed URL allowed:', seed_ok)
-print('site root allowed:', root_ok)
-raise SystemExit(0 if seed_ok else 1)
+list_ok = rc.can_fetch('$LIST_URL')
+product_ok = rc.can_fetch('$PRODUCT_URL')
+print('list URL allowed:', list_ok)
+print('product URL allowed:', product_ok)
+raise SystemExit(0 if (list_ok and product_ok) else 1)
 "; then
-            echo "OK: robots.txt allows the configured seed URL"
+            echo "OK: robots.txt allows both configured seed URLs"
         else
-            echo "[BLOCK] robots.txt currently disallows the configured seed URL -- do not proceed."
+            echo "[BLOCK] robots.txt currently disallows one of the configured seed URLs -- do not proceed."
             SKIP_START=1
         fi
     else
         echo "[WARN] curl not available -- cannot re-verify robots.txt from here"
     fi
-    echo "(this job never uses search-based discovery, and internal_links only follows"
-    echo " links already found on fetched www.goodsmile.com pages -- see"
-    echo " docs/first_production_db.md \"Phase 1 discovery method\")"
+    echo "(this job's discovery.product_url_pattern structurally cannot match /search,"
+    echo " and internal_links only follows links already found on fetched"
+    echo " www.goodsmile.com pages -- see docs/first_production_db.md \"Phase 1 discovery method\")"
 
-    # -- backup -----------------------------------------------------------------
-    echo; echo "--- preflight: backup ---"
-    ./scripts/backup.sh || { echo "[BLOCK] backup failed"; SKIP_START=1; }
+    # -- sample jobs disabled -------------------------------------------------
+    echo; echo "--- preflight: sample jobs disabled ---"
+    local ENABLED_SAMPLES
+    ENABLED_SAMPLES="$("$PY" -c "
+from db_collector_os.config import load_config
+from db_collector_os.database import Database
+from db_collector_os.job_registry import JobRegistry
+cfg = load_config('config/default.yaml')
+db = Database(cfg.db_path)
+jr = JobRegistry(db)
+bad = [j['job_id'] for j in jr.list() if j['job_id'].startswith('job_sample_') and j['enabled']]
+print(','.join(bad))
+" 2>/dev/null)"
+    if [ -n "$ENABLED_SAMPLES" ]; then
+        echo "[BLOCK] sample job(s) unexpectedly enabled: $ENABLED_SAMPLES"
+        echo "        Fix with: $CLI jobs disable <job_id>"
+        SKIP_START=1
+    else
+        echo "OK: all sample jobs ($SAMPLE_JOB_IDS) remain disabled"
+    fi
 
     # -- register + enable -------------------------------------------------------
     echo; echo "--- register + enable job ---"
     if [ "$SKIP_START" = "1" ]; then
         echo "SKIPPED -- see [BLOCK] messages above. Fix them, then re-run this script."
+        echo "GOODSMILE_PHASE1_BATCH1=FAIL"
         echo "PRODUCTION_CRAWL_STARTED=NO"
         return 0 2>/dev/null || true
     fi
 
     "$CLI" jobs sync || { echo "[FATAL] jobs sync failed"; return 1 2>/dev/null || true; }
     # jobs sync resets `enabled` to the YAML's value (false) -- enable it for
-    # real now, against the running registry, same as activate_first_production_db.sh.
+    # real now, against the running registry.
     "$CLI" jobs enable "$JOB_ID" || { echo "[FATAL] jobs enable failed"; return 1 2>/dev/null || true; }
     "$CLI" jobs resume "$JOB_ID" || { echo "[FATAL] jobs resume failed"; return 1 2>/dev/null || true; }
     echo "enabled + resumed $JOB_ID -- db-collector-worker@1.service will pick it up on its next tick"
     "$CLI" jobs show "$JOB_ID" || true
 
-    # -- launch the SSH-disconnect-safe watcher ------------------------------
+    # -- launch the SSH-disconnect-safe watcher (long-running: wait, report, ---
+    # -- auto-disable) via a single named systemd-run transient unit -----------
     echo; echo "--- launching batch watcher (systemd-run) ---"
     if ! command -v systemd-run >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
         echo "[WARN] systemd-run not available here -- the job is enabled and the persistent"
@@ -200,7 +247,8 @@ raise SystemExit(0 if seed_ok else 1)
     echo
     echo "PRODUCTION_CRAWL_STARTED=PENDING"
     echo "(the watcher disables the job automatically once the batch settles -- success or"
-    echo " anomaly alike -- so it will not silently keep re-running; re-enable for the next batch)"
+    echo " anomaly alike -- see var/reports/ for the full audit: entity/evidence counts,"
+    echo " run_history, fetch_queue status + HTTP breakdown, checkpoint, DB integrity)"
 
     echo; echo "===================================================================="
     echo " done. This shell session is unaffected."

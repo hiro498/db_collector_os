@@ -81,56 +81,77 @@ access; see "Phase 1 discovery method" below).
 
 ## Phase 1 discovery method
 
-**Decision: `internal_links` (+ `related_entities`), seeded from the one
-verified real product page. No listing/category/sitemap/URL-pattern URL was
-guessed.**
+**Decision: seed from the confirmed real Scale Figure Reference List
+(`https://www.goodsmile.com/en/scalefigure_list`) plus the one confirmed
+real product page; `internal_links` (+ `related_entities`) discovery,
+scoped by a `discovery.product_url_pattern` filter to product-detail and
+scalefigure_list URLs only. No sitemap/category/URL-ID-range was guessed.**
 
-This environment (the Claude Code session that implemented Phase 1 batch
-#1) has no outbound web access -- every attempt to reach
-`www.goodsmile.com` (curl, WebFetch) is blocked by the network egress
-policy. Per this task's own instruction ("URLやサイト構造を推測しては
-いけない"), that means no candidate listing page, category page, sitemap
-URL, or product-ID URL pattern could be verified, so none of those were
-added. What *is* known, from information given directly in this task (not
-guessed):
+`GOODSMILE_LIST_URL=https://www.goodsmile.com/en/scalefigure_list` --
+given directly as a confirmed-real URL. `PRODUCT_URL_PATTERN=/en/product/
+(\d+)/<slug>` -- derived from the one confirmed real product page's URL
+(`.../en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2B
+toridamono`), not guessed.
 
-- `robots.txt` (confirmed content): `User-agent: *` / `Disallow: /*/search`
-  -- so search-based discovery is both unavailable in this codebase
-  (`config/default.yaml` ships `search_provider: ""`) and explicitly
-  disallowed by the site; neither is used.
-- One verified, working product page (the proof URL above), whose JSON-LD
-  and `dataLayer` were directly observed.
+This environment (every Claude Code session that has worked on this job)
+has no outbound web access -- every attempt to reach `www.goodsmile.com`
+(curl, WebFetch) is blocked by the network egress policy, confirmed again
+for this revision. Per this task's own instruction ("URLやサイト構造を
+推測してはいけない"), that means **pagination could not be verified**:
+`PAGINATION_METHOD=unknown (not implemented)`. Rather than guess a
+`?page=N` query-param scheme or any other pagination mechanism, this job
+only ever follows links **actually found on pages it has itself fetched**:
 
-Given that, `internal_links` discovery (`db_collector_os/discovery/
-internal_links.py`, already implemented and tested) is the only expansion
-method that doesn't require assuming anything about site structure: it
-only ever follows `<a href>` targets **found on pages this job has itself
-already fetched**, scoped to `allowed_domains: [www.goodsmile.com]`. A
-product detail page routinely links to its category and to related
-products (the fixture's reconstructed links include exactly that shape),
-so this should organically discover more of the catalog. `related_entities`
-(schema.org `sameAs` links in JSON-LD) is enabled too, for the same
-reason -- it's a page-content-driven method, not a URL guess.
-`url_pattern` (guessing an ID range) and `sitemap_urls` (guessing a
-sitemap path) are deliberately **not** used.
+- `discovery/internal_links.py` now accepts an optional
+  `product_url_pattern` regex. A link is kept only if it matches
+  `/en/product/(\d+)/` (capturing the numeric product ID) **or**
+  `/en/scalefigure_list` (so if the listing page's own HTML contains a
+  same-path "next page" `<a href>`, whatever its query string looks like,
+  it keeps getting followed -- without this job ever having to know that
+  scheme in advance). Everything else on the same domain (about/contact/
+  cart/account/privacy/...) is filtered out before it can waste any of the
+  30-page budget, and `/search` structurally can never match either
+  branch, so it is unreachable regardless of robots.txt.
+- The captured product ID also fingerprints candidates
+  (`discovery/engine.py`): two different URLs (different slug) for the
+  same numeric ID collapse into one `entity_candidate` before either is
+  ever fetched, rather than relying only on the downstream
+  fingerprint-by-`external_id` merge to catch it after two wasted fetches.
 
-If, when running the activation/batch script below (which runs on the VPS,
-where real HTTP access exists), the operator notices an actual listing/
-category page or a real sitemap URL while watching Phase 1 progress, adding
-it to `config/jobs/prod_figure_official_site.yaml`'s `seed_urls` or
-`discovery.sitemap_urls` is a reasonable, safe follow-up -- just don't
-invent one from here.
+If the real listing page turns out to paginate some other way (an API
+call, infinite scroll with no plain `<a href>`, ...), batch #1 will simply
+discover only what's linked from the page(s) it does see -- bounded,
+never wrong, and a safe basis for deciding whether batch #2 needs a
+verified additional seed URL (found by the VPS operator, who has real
+HTTP access, not guessed from here).
+
+**Multi-manufacturer/brand**: the list page is known to mix Good Smile
+Company, Max Factory, and other official brands. Nothing in this job or
+adapter hardcodes a manufacturer/brand -- `figure_official_site.py` always
+reads `brand`/`manufacturer` from each product page's own JSON-LD/
+dataLayer (see `tests/test_goodsmile_adapter.py::
+test_brand_and_manufacturer_are_never_hardcoded_to_good_smile`). Every
+product legitimately listed on Good Smile's own site is in scope for this
+DB's population, regardless of which company actually makes it;
+`entities.domain` (`www.goodsmile.com`, the *source*) and
+`entities.data_json.brand`/`.manufacturer` (whichever company the page
+itself names) are tracked as separate fields, never conflated.
 
 ## Phase 1 batch #1 configuration
 
 ```yaml
-max_pages: 30        # hard per-run_once() ceiling regardless of discovery breadth
-max_depth: 2          # recorded for intent; not yet enforced anywhere in the
-                       # pipeline (discovery methods don't track hop count --
-                       # a known, pre-existing gap, not something this change
-                       # papers over). max_pages is the real safety bound.
+seed_urls:
+  - https://www.goodsmile.com/en/scalefigure_list
+  - https://www.goodsmile.com/en/product/1141716/Rikka%2BTakarada%2BAkane%2BShinjo%2Bfeat.%2Btoridamono
+discovery:
+  product_url_pattern: "/en/product/(\\d+)/|/en/scalefigure_list"
+max_pages: 30         # hard per-run_once() ceiling regardless of discovery breadth
+max_depth: 2           # recorded for intent; not yet enforced anywhere in the
+                        # pipeline (discovery methods don't track hop count --
+                        # a known, pre-existing gap, not something this change
+                        # papers over). max_pages is the real safety bound.
 concurrency: 1
-rate_limit: 5.0        # seconds between requests to the same domain
+rate_limit: 5.0         # seconds between requests to the same domain
 schedule: "@daily"
 ```
 
@@ -152,21 +173,36 @@ adds (verified by `tests/test_production_job_figure.py`).
 
 **Repo state**: this file's job YAML ships `enabled: false`, as required --
 enabling happens only on the VPS via `db-collector jobs enable` (see
-`scripts/phase1_batch1_goodsmile.sh`), never by flipping the YAML.
+`scripts/run_goodsmile_phase1_batch1.sh`), never by flipping the YAML.
 
 ## VPS: run Phase 1 batch #1
 
 ```bash
 cd /root/tools/db_collector_os
-./scripts/phase1_batch1_goodsmile.sh
+./scripts/run_goodsmile_phase1_batch1.sh
 ```
 
-SSH-disconnect-safe: preflight checks and enabling the job run in your
-shell; the actual crawl always runs through the already-persistent
+Preflight (all in your foreground shell, all read-only except the backup
+and the job-registry sync/enable at the very end, only reached if every
+check passes): git clean/fetch/ff-only/HEAD-vs-origin, DB backup, DB
+integrity, systemd services active, Admin UI HTTP 200, the existing
+Resource Controller's admission gate (reads current CPU/RAM/swap/disk/load
+-- never modifies swap or thresholds), a live robots.txt re-check against
+both seed URLs, and confirmation the 4 sample jobs are still disabled. Any
+failure prints `[BLOCK]`/`[FATAL]` and leaves the job untouched
+(`GOODSMILE_PHASE1_BATCH1=FAIL`, `PRODUCTION_CRAWL_STARTED=NO`) -- safe to
+fix and re-run.
+
+SSH-disconnect-safe: preflight + enabling the job run in your shell; the
+actual crawl always runs through the already-persistent
 `db-collector-worker@1.service` (unaffected by your SSH session either
-way), and the post-batch wait/report/auto-disable step runs via a single
-named `systemd-run` transient unit so it keeps going, and writes its
-report, even if you disconnect. See the script's own header comment and
+way, with or without systemd-run); the post-batch wait/report/success-gate/
+auto-disable step runs via a single named `systemd-run` transient unit
+(`db-collector-phase1-batch1-goodsmile`) so it keeps going, and writes its
+report to `var/reports/`, even if you disconnect. See the script's own
+header comment, `scripts/_phase1_batch1_watch_and_report.sh` (the watcher;
+evaluates the batch #1 success gate and always disables the job
+afterward), `scripts/_phase1_batch1_report.py` (the report generator), and
 `scripts/activate_first_production_db.sh` (the original 1-product
 activation script; still valid, just superseded by the batch script above
 for anything beyond a single proof page) for more detail.
