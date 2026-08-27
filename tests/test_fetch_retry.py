@@ -68,6 +68,34 @@ def test_fetch_unsupported_content_type_rejected():
 
 
 @responses.activate
+def test_fetch_decodes_utf8_body_without_explicit_header_charset():
+    # A very common real-world pattern (especially on Japanese sites): the
+    # Content-Type header omits charset, and only an HTML <meta charset> tag
+    # declares it. `requests` would otherwise default such bodies to
+    # ISO-8859-1 per header) and mojibake every non-ASCII byte.
+    html = '<html><head><meta charset="utf-8"><title>タイトル</title></head><body>本文</body></html>'
+    responses.add(
+        responses.GET, "https://example.com/ja", body=html.encode("utf-8"), status=200, content_type="text/html",
+    )
+    result = _engine().fetch("https://example.com/ja")
+    assert result.ok
+    assert "タイトル" in result.content
+    assert "本文" in result.content
+
+
+@responses.activate
+def test_fetch_trusts_explicit_header_charset_when_present():
+    html = '<html><head><title>Explicit UTF-8</title></head><body>データ</body></html>'
+    responses.add(
+        responses.GET, "https://example.com/ja-explicit", body=html.encode("utf-8"), status=200,
+        content_type="text/html; charset=utf-8",
+    )
+    result = _engine().fetch("https://example.com/ja-explicit")
+    assert result.ok
+    assert "データ" in result.content
+
+
+@responses.activate
 def test_fetch_captcha_page_is_blocked():
     responses.add(
         responses.GET, "https://example.com/captcha", status=200, content_type="text/html",

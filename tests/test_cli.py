@@ -55,3 +55,43 @@ def test_health_command(tmp_path, monkeypatch):
     result = runner.invoke(main, ["--config", str(config_path), "health"])
     data = json.loads(result.output)
     assert data["db_integrity_ok"] is True
+
+
+def test_jobs_enable_disable_commands(tmp_path, monkeypatch):
+    config_path = _write_config(tmp_path, monkeypatch)
+    runner = CliRunner()
+    runner.invoke(main, ["--config", str(config_path), "migrate"])
+
+    from db_collector_os.config import load_config
+    from db_collector_os.database import Database
+    from db_collector_os.job_registry import JobRegistry
+
+    cfg = load_config(str(config_path))
+    db = Database(cfg.db_path)
+    job_id = JobRegistry(db).create(
+        job_name="t", category="c", target_db="d", target_table="entities",
+        collector_type="official_site", adapter="sample_official_site", enabled=False,
+    )
+    db.close()
+
+    result = runner.invoke(main, ["--config", str(config_path), "jobs", "enable", job_id])
+    assert result.exit_code == 0, result.output
+    assert f"enabled {job_id}" in result.output
+
+    db = Database(cfg.db_path)
+    assert JobRegistry(db).get(job_id)["enabled"] is True
+    db.close()
+
+    result = runner.invoke(main, ["--config", str(config_path), "jobs", "disable", job_id])
+    assert result.exit_code == 0, result.output
+    db = Database(cfg.db_path)
+    assert JobRegistry(db).get(job_id)["enabled"] is False
+    db.close()
+
+
+def test_jobs_enable_unknown_job_fails(tmp_path, monkeypatch):
+    config_path = _write_config(tmp_path, monkeypatch)
+    runner = CliRunner()
+    runner.invoke(main, ["--config", str(config_path), "migrate"])
+    result = runner.invoke(main, ["--config", str(config_path), "jobs", "enable", "does_not_exist"])
+    assert result.exit_code == 1

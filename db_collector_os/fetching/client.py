@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import re
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -16,6 +17,14 @@ from urllib.parse import urlsplit
 import requests
 
 from .robots import RobotsCache
+
+# `requests` falls back to ISO-8859-1 for text/* responses whose Content-Type
+# header omits an explicit charset (per old RFC 2616 default) -- but a large
+# share of real-world sites (particularly Japanese ones) only declare their
+# encoding via an HTML <meta charset> tag and never in the header, which
+# would otherwise silently mojibake every non-ASCII page. Sniff that tag
+# before trusting requests' header-only guess.
+_META_CHARSET_RE = re.compile(rb'<meta[^>]+charset=["\']?\s*([a-zA-Z0-9_-]+)', re.IGNORECASE)
 
 _ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "application/xml", "text/xml", "application/json")
 
@@ -130,7 +139,7 @@ class FetchEngine:
                 error=f"unsupported content-type: {content_type}",
             )
 
-        text = resp.text
+        text = _decode_body(resp)
         lowered = text[:5000].lower()
         if any(marker in lowered for marker in _CAPTCHA_MARKERS):
             return FetchResult(
@@ -144,6 +153,30 @@ class FetchEngine:
             content=text, content_type=content_type, content_hash=content_hash,
             etag=resp.headers.get("ETag"), last_modified=resp.headers.get("Last-Modified"),
         )
+
+
+def _decode_body(resp: requests.Response) -> str:
+    """Decode a response body, trusting the server's own charset declaration
+    when it explicitly gave one, otherwise sniffing the HTML <meta charset>
+    tag, and finally falling back to a content-based guess -- never the bare
+    ISO-8859-1 default `resp.text` would otherwise silently apply.
+    """
+    content_type_header = resp.headers.get("Content-Type", "")
+    if "charset=" in content_type_header.lower():
+        return resp.text  # server was explicit; requests already decoded it correctly
+
+    match = _META_CHARSET_RE.search(resp.content[:4096])
+    if match:
+        try:
+            return resp.content.decode(match.group(1).decode("ascii", "ignore"), errors="replace")
+        except (LookupError, UnicodeDecodeError):
+            pass
+
+    encoding = resp.apparent_encoding or "utf-8"
+    try:
+        return resp.content.decode(encoding, errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        return resp.content.decode("utf-8", errors="replace")
 
 
 def _parse_retry_after(value: str | None) -> float | None:

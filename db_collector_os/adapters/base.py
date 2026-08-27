@@ -22,6 +22,16 @@ class ExtractedRecord:
     confidence: float = 0.6
     fields: dict[str, Any] = field(default_factory=dict)  # everything else, DB-specific
     missing_required: list[str] = field(default_factory=list)
+    # Set by an Adapter to say "this fetched page is confirmed not to be an
+    # entity page at all" (a category/listing/nav/boilerplate page reached via
+    # internal-link discovery), as opposed to `missing_required` ("this looks
+    # like an entity page but is incomplete/malformed"). `skip` records are
+    # dropped silently (fetch still counts, candidate -> rejected) instead of
+    # going to the Review Queue, so real-site crawls with nav/footer links
+    # don't flood review with non-entity pages. Defaults to False so existing
+    # adapters that never set it keep their exact prior behavior.
+    skip: bool = False
+    skip_reason: str | None = None
 
 
 class Adapter:

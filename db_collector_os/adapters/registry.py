@@ -18,10 +18,21 @@ def register_adapter(name: str):
     return decorator
 
 
+def _import_builtin_adapters() -> None:
+    # Make sure every built-in adapter module registers itself. Importing a
+    # module is idempotent, so calling this repeatedly is cheap and safe.
+    from . import (  # noqa: F401
+        figure_official_site,
+        sample_api,
+        sample_local_business,
+        sample_official_site,
+        sample_person,
+    )
+
+
 def get_adapter(name: str) -> Adapter:
     if name not in _REGISTRY:
-        # Make sure built-in sample adapters are registered.
-        from . import sample_official_site, sample_local_business, sample_person, sample_api  # noqa: F401
+        _import_builtin_adapters()
 
     if name not in _REGISTRY:
         raise KeyError(f"Unknown adapter: {name!r}. Registered: {sorted(_REGISTRY)}")
@@ -29,6 +40,5 @@ def get_adapter(name: str) -> Adapter:
 
 
 def list_adapters() -> list[str]:
-    from . import sample_official_site, sample_local_business, sample_person, sample_api  # noqa: F401
-
+    _import_builtin_adapters()
     return sorted(_REGISTRY)

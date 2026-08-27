@@ -241,6 +241,33 @@ def jobs_resume(ctx: click.Context, job_id: str) -> None:
     click.echo(f"resumed {job_id}")
 
 
+@jobs.command("enable")
+@click.argument("job_id")
+@click.pass_context
+def jobs_enable(ctx: click.Context, job_id: str) -> None:
+    """Flip a job's `enabled` flag on (it still needs status idle/completed/retry
+    -- see `jobs resume` -- to actually become due)."""
+    registry = JobRegistry(_db(ctx))
+    if not registry.get(job_id):
+        click.echo(f"no such job: {job_id}", err=True)
+        sys.exit(1)
+    registry.set_enabled(job_id, True)
+    click.echo(f"enabled {job_id}")
+
+
+@jobs.command("disable")
+@click.argument("job_id")
+@click.pass_context
+def jobs_disable(ctx: click.Context, job_id: str) -> None:
+    """Flip a job's `enabled` flag off. Does not stop an already-running run."""
+    registry = JobRegistry(_db(ctx))
+    if not registry.get(job_id):
+        click.echo(f"no such job: {job_id}", err=True)
+        sys.exit(1)
+    registry.set_enabled(job_id, False)
+    click.echo(f"disabled {job_id}")
+
+
 @jobs.command("show")
 @click.argument("job_id")
 @click.pass_context

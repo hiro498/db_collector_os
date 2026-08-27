@@ -43,6 +43,24 @@ def test_create_is_upsert(db):
     assert len(jr.list()) == 1
 
 
+def test_set_enabled_then_resync_reverts_to_yaml_value(db):
+    """Documents an operational trap: `create()` (used by `jobs sync`) always
+    writes `enabled` from its argument (ON CONFLICT ... enabled=excluded.enabled).
+    So a manual `jobs enable` survives until the next `jobs sync` re-applies
+    whatever the YAML file currently says -- the YAML is the durable source
+    of truth for `enabled`, not the DB. Deployment scripts must account for
+    this ordering (sync, then enable -- not the other way around, or re-sync
+    the YAML with enabled: true baked in).
+    """
+    jr = JobRegistry(db)
+    job_id = make_job(jr, job_id="resync_test", enabled=False)
+    jr.set_enabled(job_id, True)
+    assert jr.get(job_id)["enabled"] is True
+
+    make_job(jr, job_id="resync_test", enabled=False)  # simulates a re-sync from YAML
+    assert jr.get(job_id)["enabled"] is False
+
+
 def test_due_jobs_respects_enabled_and_schedule(db):
     jr = JobRegistry(db)
     disabled = make_job(jr, enabled=False)

@@ -220,6 +220,14 @@ class BaseCollector:
         ctx = self.ctx
         job_id = job["job_id"]
 
+        if record.skip:
+            # Confirmed non-entity page (category/listing/nav/...): drop it
+            # quietly rather than sending it to review -- it was never a
+            # candidate entity in the first place.
+            if candidate:
+                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.REJECTED)
+            return
+
         if record.missing_required:
             ctx.review.add(
                 job_id, ReviewReason.MISSING_REQUIRED_FIELD,

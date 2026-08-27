@@ -27,7 +27,7 @@ repository; the VPS only pulls, installs, and runs.
   - [First install](#first-install)
   - [Update](#update)
   - [Rollback](#rollback)
-- [Add a new DB](#add-a-new-db)
+- [Add a new DB](#add-a-new-db) ([Production DB #1 reference](docs/first_production_db.md))
 - [Add a new Adapter](#add-a-new-adapter)
 - [Add a new Job](#add-a-new-job)
 - [Admin UI](#admin-ui)
@@ -211,6 +211,13 @@ You need exactly two things:
 
 1. An **Adapter** (below).
 2. A **Job** YAML file under `config/jobs/`.
+
+**Production DB #1** (`job_prod_figure_official_site`, 美少女フィギュア公式
+メーカーDB) follows exactly this pattern and is a working, tested reference
+for adding #2 onward -- see
+[`docs/first_production_db.md`](docs/first_production_db.md) for the
+selection rationale, source strategy, rate limits, and how to enable/pause/
+resume it on the VPS.
 
 ## Add a new Adapter
 
