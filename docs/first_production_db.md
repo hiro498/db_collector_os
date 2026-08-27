@@ -15,6 +15,27 @@ DBs.
 | **category / target_db** | `figure` / `figure_official_site` |
 | **Source** | Good Smile Company official site (`www.goodsmile.com`) |
 
+```
+FIRST_PRODUCTION_DB: 美少女フィギュア公式メーカーDB
+SOURCE:              Good Smile Company official site
+LIST URL:            https://www.goodsmile.com/en/scalefigure_list
+PRODUCT URL:         https://www.goodsmile.com/en/product/<product-id>/...
+DISCOVERY METHOD:    公式Scale Figure一覧 -> Product detailsリンク -> product detail
+```
+
+`robots.txt` (confirmed content, re-checked live by `scripts/run_goodsmile_phase1_batch1.sh`'s
+preflight on every run since it has real HTTP access, unlike this
+authoring environment):
+
+```
+User-agent: *
+Disallow: /*/search
+```
+
+`/search` is therefore never used as a seed or discovery target -- see
+"Phase 1 discovery method" below for why `discovery.product_url_pattern`
+makes that structurally true, not just a convention.
+
 ## Why this DB first
 
 Selected from the candidate list (order suits, tanning salons, gyms, love

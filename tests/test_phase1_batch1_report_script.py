@@ -62,6 +62,13 @@ def test_report_script_success_case(tmp_path):
     assert "LATEST_RUN_STATUS=completed" in result.stdout
     assert "run_history" in result.stdout
     assert "checkpoint" in result.stdout
+    assert "checkpoint_updated_at=" in result.stdout
+    assert "HTTP_2XX_COUNT=" in result.stdout
+    assert "HTTP_403_COUNT=" in result.stdout
+    assert "HTTP_404_COUNT=" in result.stdout
+    assert "HTTP_429_COUNT=" in result.stdout
+    assert "HTTP_5XX_COUNT=" in result.stdout
+    assert "reason breakdown" in result.stdout
 
 
 def test_report_script_unknown_job_still_runs_cleanly(tmp_path):

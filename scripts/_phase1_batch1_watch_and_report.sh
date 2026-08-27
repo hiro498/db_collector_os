@@ -82,7 +82,7 @@ INTEGRITY_OUTPUT="$("$CLI" integrity 2>&1)"
 echo "$INTEGRITY_OUTPUT" | tee -a "$REPORT_FILE"
 
 log ""
-log "--- services active ---"
+log "--- services active (after batch) ---"
 SERVICES_OK=1
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     for svc in db-collector-scheduler.service db-collector-worker@1.service db-collector-admin.service; do
@@ -145,6 +145,10 @@ BATCH_INSERTED="$(grep -oE 'BATCH_INSERTED=[0-9]+' "$REPORT_FILE" | tail -1 | cu
 BATCH_ERRORS="$(grep -oE 'BATCH_ERRORS=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 OPEN_REVIEW_COUNT="$(grep -oE 'OPEN_REVIEW_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 ENTITY_COUNT="$(grep -oE 'ENTITY_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
+HTTP_403_COUNT="$(grep -oE 'HTTP_403_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
+HTTP_404_COUNT="$(grep -oE 'HTTP_404_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
+HTTP_429_COUNT="$(grep -oE 'HTTP_429_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
+HTTP_5XX_COUNT="$(grep -oE 'HTTP_5XX_COUNT=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 MAX_ERROR_RATE="$("$PY" -c "
 from db_collector_os.config import load_config
 from db_collector_os.database import Database
@@ -188,6 +192,19 @@ else
 fi
 [ "${OPEN_REVIEW_COUNT:-0}" -le "$REVIEW_BOUND" ] 2>/dev/null || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}open_review_count_elevated(${OPEN_REVIEW_COUNT:-0} > ${REVIEW_BOUND});"
 
+# "HTTP errors not abnormally elevated": 403/404/429 each individually
+# bounded by max(5, 20% of fetched) -- a couple of stray 404s on a 30-page
+# batch is normal; a wall of them means the discovery/URL logic is wrong
+# and the batch should not be treated as a pass even if some pages
+# succeeded. Any 5xx at all is flagged too (5xx should be rare/transient).
+FETCHED_VAL="${BATCH_FETCHED:-0}"
+HTTP_BOUND="$("$PY" -c "print(max(5, int(${FETCHED_VAL:-0} * 0.2)))" 2>/dev/null)"
+HTTP_BOUND="${HTTP_BOUND:-5}"
+[ "${HTTP_403_COUNT:-0}" -le "$HTTP_BOUND" ] 2>/dev/null || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}http_403_elevated(${HTTP_403_COUNT:-0} > ${HTTP_BOUND});"
+[ "${HTTP_404_COUNT:-0}" -le "$HTTP_BOUND" ] 2>/dev/null || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}http_404_elevated(${HTTP_404_COUNT:-0} > ${HTTP_BOUND});"
+[ "${HTTP_429_COUNT:-0}" -le "$HTTP_BOUND" ] 2>/dev/null || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}http_429_elevated(${HTTP_429_COUNT:-0} > ${HTTP_BOUND});"
+[ "${HTTP_5XX_COUNT:-0}" -eq 0 ] 2>/dev/null || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}http_5xx_present(${HTTP_5XX_COUNT:-0});"
+
 if [ -z "$GATE_FAIL_REASONS" ]; then
     log "GOODSMILE_PHASE1_BATCH1=PASS"
     log "READY_FOR_BATCH2=YES"
@@ -201,7 +218,7 @@ log ""
 log "Disabling job as designed (Phase 1 batch #1 is one batch at a time --"
 log "success or anomaly alike -- see docs/first_production_db.md)."
 "$CLI" jobs disable "$JOB_ID" 2>&1 | tee -a "$REPORT_FILE"
-log "PRODUCTION_JOB_DISABLED=YES"
+log "PRODUCTION_JOB_DISABLED_AFTER_BATCH=YES"
 log "Re-enable for the next batch with: $CLI jobs enable $JOB_ID && $CLI jobs resume $JOB_ID"
 
 log ""

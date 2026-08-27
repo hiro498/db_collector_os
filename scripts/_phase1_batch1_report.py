@@ -70,11 +70,51 @@ def main() -> int:
         print(dict(row))
 
     print()
+    print("--- fetch_queue HTTP status breakdown (machine-parseable) ---")
+    # Buckets on top of the raw per-code breakdown above, so the calling
+    # watch script can gate on 403/404/429/5xx without parsing free-form
+    # dict output. NULL/None (not yet fetched) and non-numeric statuses are
+    # excluded from every bucket.
+    http_counts = {"2xx": 0, "403": 0, "404": 0, "429": 0, "5xx": 0}
+    for row in db.query(
+        "SELECT last_http_status, COUNT(*) AS n FROM fetch_queue WHERE job_id=? "
+        "AND last_http_status IS NOT NULL GROUP BY last_http_status",
+        (job_id,),
+    ):
+        code = row["last_http_status"]
+        n = row["n"]
+        try:
+            code_int = int(code)
+        except (TypeError, ValueError):
+            continue
+        if 200 <= code_int < 300:
+            http_counts["2xx"] += n
+        elif code_int == 403:
+            http_counts["403"] += n
+        elif code_int == 404:
+            http_counts["404"] += n
+        elif code_int == 429:
+            http_counts["429"] += n
+        elif 500 <= code_int < 600:
+            http_counts["5xx"] += n
+    print(f"HTTP_2XX_COUNT={http_counts['2xx']}")
+    print(f"HTTP_403_COUNT={http_counts['403']}")
+    print(f"HTTP_404_COUNT={http_counts['404']}")
+    print(f"HTTP_429_COUNT={http_counts['429']}")
+    print(f"HTTP_5XX_COUNT={http_counts['5xx']}")
+
+    print()
     print("--- review queue ---")
     n_open_review = db.query_one(
         "SELECT COUNT(*) AS n FROM review_queue WHERE job_id=? AND status='open'", (job_id,)
     )["n"]
     print(f"open_review_count={n_open_review}")
+    print("reason breakdown (open only):")
+    for row in db.query(
+        "SELECT reason, COUNT(*) AS n FROM review_queue WHERE job_id=? AND status='open' GROUP BY reason",
+        (job_id,),
+    ):
+        print(dict(row))
     for row in db.query(
         "SELECT review_id, reason, details FROM review_queue WHERE job_id=? AND status='open' LIMIT 20",
         (job_id,),
@@ -83,7 +123,10 @@ def main() -> int:
 
     print()
     print("--- checkpoint ---")
-    print(CheckpointStore(db).load(job_id))
+    checkpoint = CheckpointStore(db).load(job_id)
+    print(checkpoint)
+    checkpoint_row = db.query_one("SELECT updated_at FROM checkpoints WHERE job_id=?", (job_id,))
+    print(f"checkpoint_updated_at={checkpoint_row['updated_at'] if checkpoint_row else None}")
 
     print()
     print("--- batch totals (sum of run_history across every run this job has had) ---")

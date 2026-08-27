@@ -68,17 +68,30 @@ db_collector_phase1_batch1_goodsmile() {
     fi
 
     # -- git: fetch + ff-only + HEAD vs origin --------------------------------
-    echo; echo "--- preflight: git fetch / ff-only / HEAD vs origin ---"
+    echo; echo "--- preflight: git fetch --prune / ff-only merge / HEAD vs origin ---"
     local BRANCH; BRANCH="$(git branch --show-current 2>/dev/null || true)"
-    if git fetch origin "$BRANCH" 2>&1; then
+    if git fetch origin --prune "$BRANCH" 2>&1; then
         local LOCAL_HEAD REMOTE_HEAD
         LOCAL_HEAD="$(git rev-parse HEAD 2>/dev/null)"
         REMOTE_HEAD="$(git rev-parse "origin/$BRANCH" 2>/dev/null)"
         if [ "$LOCAL_HEAD" = "$REMOTE_HEAD" ]; then
             echo "OK: HEAD matches origin/$BRANCH ($LOCAL_HEAD)"
+        elif git merge-base --is-ancestor "$LOCAL_HEAD" "$REMOTE_HEAD" 2>/dev/null; then
+            # Local HEAD is behind origin but on the same line of history --
+            # a fast-forward merge is safe and loses nothing. Only ever
+            # advances local HEAD to match origin; never rewrites/rebases.
+            echo "local HEAD ($LOCAL_HEAD) is behind origin/$BRANCH ($REMOTE_HEAD) -- fast-forwarding..."
+            if git merge --ff-only "origin/$BRANCH" 2>&1; then
+                LOCAL_HEAD="$(git rev-parse HEAD 2>/dev/null)"
+                echo "OK: fast-forwarded to origin/$BRANCH ($LOCAL_HEAD)"
+            else
+                echo "[BLOCK] git merge --ff-only origin/$BRANCH failed unexpectedly."
+                SKIP_START=1
+            fi
         else
-            echo "[BLOCK] HEAD ($LOCAL_HEAD) does not match origin/$BRANCH ($REMOTE_HEAD)."
-            echo "        Run scripts/update_vps.sh first, then re-run this script."
+            echo "[BLOCK] HEAD ($LOCAL_HEAD) has diverged from origin/$BRANCH ($REMOTE_HEAD) --"
+            echo "        not a fast-forward. Resolve manually (this script never rebases/force-merges),"
+            echo "        then re-run this script."
             SKIP_START=1
         fi
     else
@@ -92,6 +105,15 @@ db_collector_phase1_batch1_goodsmile() {
     # -- DB integrity -----------------------------------------------------------
     echo; echo "--- preflight: DB integrity ---"
     "$CLI" integrity || { echo "[BLOCK] integrity check failed"; SKIP_START=1; }
+
+    # -- compile check ------------------------------------------------------------
+    echo; echo "--- preflight: compile check ---"
+    if "$PY" -m compileall -q db_collector_os scripts; then
+        echo "OK: db_collector_os/ and scripts/ compile cleanly"
+    else
+        echo "[BLOCK] compileall found a syntax error -- do not proceed"
+        SKIP_START=1
+    fi
 
     # -- services active ----------------------------------------------------------
     echo; echo "--- preflight: services active ---"
