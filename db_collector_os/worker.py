@@ -16,12 +16,69 @@ import socket
 import time
 from datetime import datetime, timedelta, timezone
 
-from .collectors import CollectorContext, get_collector
+from .collectors import CollectorContext, RunOutcome, get_collector
 from .config import AppConfig
 from .database import Database
 from .job_registry import JobRegistry, now_iso, now_plus
 from .logging_config import get_logger
 from .models.enums import JobPhase, JobStatus, RunStatus
+
+
+def run_job_and_record(
+    ctx: CollectorContext, jobs: JobRegistry, job: dict, poll_interval_seconds: float = 5.0, logger=None,
+) -> tuple[RunOutcome | None, str]:
+    """Run one collector pass for `job` (already claimed into 'running') and
+    durably record the outcome: finishes the run_history row (completed or
+    failed, with finished_at/duration_seconds/counts set), clears the
+    in-flight checkpoint run_id, and updates the job's status/phase/
+    next_run_at.
+
+    This is the single source of truth for "what happens after run_once()"
+    -- both Worker.run_one_job() (the systemd-run production path) and the
+    `db-collector jobs run` CLI command call it, so a run's bookkeeping can
+    never drift between the two call sites again (see the run_history bug
+    from the first production proof, where the CLI path called run_once()
+    directly and never finished the run_history row).
+
+    Returns (outcome, status); outcome is None if the collector raised.
+    """
+    job_id = job["job_id"]
+    try:
+        collector = get_collector(job["collector_type"], ctx)
+        outcome = collector.run_once(job)
+    except Exception as exc:  # per-job isolation: one job's failure never kills the caller
+        if logger:
+            logger.exception("job %s failed: %s", job_id, exc)
+        checkpoint = ctx.checkpoints.load(job_id)
+        run_id = checkpoint["state"].get("current_run_id")
+        if not run_id:
+            # The failure happened before run_once() reached run_history.start()
+            # (e.g. an unresolvable adapter name) -- still record a failed run
+            # rather than leaving this invocation with no run_history trace at all.
+            run_id = ctx.run_history.start(job_id)
+        ctx.run_history.finish(run_id, RunStatus.FAILED, error_count=1)
+        jobs.finish(job_id, JobStatus.FAILED)
+        return None, JobStatus.FAILED
+
+    job_after = jobs.get(job_id)
+    checkpoint = ctx.checkpoints.load(job_id)
+    run_id = checkpoint["state"].get("current_run_id")
+    still_working = job_after["phase"] != JobPhase.INCREMENTAL and not ctx.fetch_queue.is_empty(job_id)
+
+    if run_id:
+        ctx.run_history.finish(run_id, RunStatus.COMPLETED, **outcome.as_kwargs())
+    state = checkpoint["state"]
+    state.pop("current_run_id", None)
+    ctx.checkpoints.save(job_id, None, job_after["phase"], state)
+
+    if still_working:
+        jobs.finish(job_id, JobStatus.RETRY, next_run_override=now_plus(poll_interval_seconds))
+        status = JobStatus.RETRY
+    else:
+        jobs.finish(job_id, JobStatus.COMPLETED)
+        status = JobStatus.COMPLETED
+
+    return outcome, status
 
 
 class Worker:
@@ -82,40 +139,15 @@ class Worker:
         self._heartbeat("busy", job["job_id"])
         self.logger.info("running job %s (%s) phase=%s", job["job_id"], job["job_name"], job["phase"])
 
-        try:
-            collector = get_collector(job["collector_type"], self.ctx)
-            outcome = collector.run_once(job)
-        except Exception as exc:  # per-job isolation: one job's failure never kills the worker
-            self.logger.exception("job %s failed: %s", job["job_id"], exc)
-            checkpoint = self.ctx.checkpoints.load(job["job_id"])
-            run_id = checkpoint["state"].get("current_run_id")
-            if run_id:
-                self.ctx.run_history.finish(run_id, RunStatus.FAILED, error_count=1)
-            self.jobs.finish(job["job_id"], JobStatus.FAILED)
-            self._heartbeat("idle", None)
-            return True
-
-        job_after = self.jobs.get(job["job_id"])
-        checkpoint = self.ctx.checkpoints.load(job["job_id"])
-        run_id = checkpoint["state"].get("current_run_id")
-        still_working = job_after["phase"] != JobPhase.INCREMENTAL and not self.ctx.fetch_queue.is_empty(job["job_id"])
-
-        run_status = RunStatus.COMPLETED
-        if run_id:
-            self.ctx.run_history.finish(run_id, run_status, **outcome.as_kwargs())
-        state = checkpoint["state"]
-        state.pop("current_run_id", None)
-        self.ctx.checkpoints.save(job["job_id"], None, job_after["phase"], state)
-
-        if still_working:
-            self.jobs.finish(job["job_id"], JobStatus.RETRY, next_run_override=now_plus(self.config.worker_poll_interval_seconds))
-        else:
-            self.jobs.finish(job["job_id"], JobStatus.COMPLETED)
-
-        self.logger.info(
-            "job %s finished: fetched=%d inserted=%d updated=%d review=%d errors=%d",
-            job["job_id"], outcome.fetched, outcome.inserted, outcome.updated, outcome.reviewed, outcome.errors,
+        outcome, _status = run_job_and_record(
+            self.ctx, self.jobs, job, self.config.worker_poll_interval_seconds, self.logger,
         )
+
+        if outcome is not None:
+            self.logger.info(
+                "job %s finished: fetched=%d inserted=%d updated=%d review=%d errors=%d",
+                job["job_id"], outcome.fetched, outcome.inserted, outcome.updated, outcome.reviewed, outcome.errors,
+            )
         self._heartbeat("idle", None)
         return True
 

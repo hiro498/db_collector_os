@@ -28,7 +28,7 @@ import yaml
 
 from .candidates import CandidateStore
 from .checkpoint import CheckpointStore
-from .collectors import CollectorContext, get_collector
+from .collectors import CollectorContext
 from .config import AppConfig, load_config
 from .database import Database
 from .fetching import FetchQueue
@@ -40,7 +40,7 @@ from .resource_controller import ResourceController
 from .review import ReviewQueue
 from .run_history import RunHistoryStore
 from .scheduler import Scheduler
-from .worker import Worker
+from .worker import Worker, run_job_and_record
 
 
 @click.group()
@@ -219,10 +219,11 @@ def jobs_run(ctx: click.Context, job_id: str) -> None:
         sys.exit(1)
     job = registry.get(job_id)
     ctx_obj = CollectorContext.build(config, db)
-    collector = get_collector(job["collector_type"], ctx_obj)
-    outcome = collector.run_once(job)
-    registry.finish(job_id, JobStatus.COMPLETED)
-    click.echo(json.dumps(outcome.as_kwargs(), indent=2))
+    outcome, status = run_job_and_record(ctx_obj, registry, job, config.worker_poll_interval_seconds)
+    if outcome is None:
+        click.echo(json.dumps({"status": status, "error": "job raised an exception -- see logs/worker.log"}, indent=2))
+        sys.exit(1)
+    click.echo(json.dumps({"status": status, **outcome.as_kwargs()}, indent=2))
 
 
 @jobs.command("pause")

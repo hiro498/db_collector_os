@@ -1,9 +1,20 @@
 # PRODUCTION job #1: 美少女フィギュア公式メーカーDB
-# First real source: Good Smile Company official product page.
+# Source: Good Smile Company official product pages.
 #
-# Initial production proof is intentionally limited to ONE verified official
-# product page. After entity/evidence/checkpoint/review validation succeeds,
-# expand discovery in a separate follow-up change.
+# History:
+#   - Single-product production proof (1 known URL, max_pages=1): PASSED --
+#     entity_count=1, evidence_count=13, run_errors=0, open_reviews=0.
+#     Two bugs found from that run were fixed separately (HTML entity
+#     decoding in JSON-LD; run_history not being finished by `jobs run`).
+#   - This revision expands to Phase 1 batch #1: discovery via internal
+#     links from the one verified real product page (see
+#     docs/first_production_db.md "Phase 1 discovery method" for why --
+#     no listing/category/sitemap URL was guessed).
+#
+# robots.txt (confirmed): "User-agent: *\nDisallow: /*/search". This job
+# never uses search-based discovery and internal_links only ever follows
+# links found on already-fetched www.goodsmile.com pages, so it never visits
+# a disallowed path.
 job_id: "job_prod_figure_official_site"
 job_name: "Figure Official Site (Production #1 - Good Smile)"
 category: "figure"
@@ -12,13 +23,18 @@ target_table: "entities"
 collector_type: "official_site"
 adapter: "figure_official_site"
 priority: 50
-# Keep disabled in Git. VPS activation enables the registry only after the
-# Resource Controller admits a new job.
+# Keep disabled in Git. The VPS activation script enables the registry row
+# directly (db-collector jobs enable/resume) only after preflight checks
+# pass -- this file stays enabled: false regardless.
 enabled: false
 schedule: "@daily"
-# First production proof: exactly one known official Product JSON-LD page.
-max_pages: 1
-max_depth: 0
+# Phase 1 batch #1: conservative, bounded expansion from the one verified
+# product page. 30/1/5.0 match the task's suggested starting point; kept
+# rather than tuned tighter/looser since this environment has no outbound
+# web access to verify the real catalog's size or server behavior (see
+# docs/first_production_db.md) -- these are safe defaults, not a guess.
+max_pages: 30
+max_depth: 2
 concurrency: 1
 rate_limit: 5.0
 config:
@@ -28,14 +44,14 @@ config:
     sitemap_urls: []
     robots_seed_urls:
       - "https://www.goodsmile.com/"
-    internal_links: false
-    related_entities: false
+    internal_links: true
+    related_entities: true
     allowed_domains:
       - "www.goodsmile.com"
   phase1_conditions:
     queue_empty: true
-    require_discovery_saturation: false
-    consecutive_low_discovery_runs: 1
+    require_discovery_saturation: true
+    consecutive_low_discovery_runs: 3
     max_error_rate: 0.5
     min_entity_count: 1
   incremental_revalidate_after_seconds: 604800

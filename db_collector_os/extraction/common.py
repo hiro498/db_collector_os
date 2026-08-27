@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
+from ..normalization.html_entities import decode_html_entities
 from .jsonld import extract_json_ld
 
 _PHONE_RE = re.compile(r"(0\d{1,4}-\d{1,4}-\d{3,4}|0\d{9,10}|\+81[\d-]{9,13})")
@@ -78,12 +79,17 @@ def extract_common(html: str, base_url: str) -> dict[str, Any]:
         image_urls.append(urljoin(base_url, img["src"]))
 
     return {
-        "title": title,
+        # bs4/lxml already HTML-decode ordinary text nodes and attribute
+        # values, but decode_html_entities() is idempotent -- applying it
+        # again here is a cheap defense against double-escaped source data
+        # (e.g. a CMS that escaped a field twice) rather than a fix for a
+        # known bug in this path (unlike JSON-LD; see extraction/jsonld.py).
+        "title": decode_html_entities(title),
         "canonical_url": canonical or base_url,
-        "meta_description": meta_description,
+        "meta_description": decode_html_entities(meta_description),
         "json_ld": json_ld,
-        "name": name,
-        "address": address,
+        "name": decode_html_entities(name),
+        "address": decode_html_entities(address),
         "telephone": telephone,
         "links": _dedupe(links)[:500],
         "social_urls": _dedupe(social_urls)[:50],
