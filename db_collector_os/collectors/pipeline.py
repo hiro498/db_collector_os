@@ -24,6 +24,43 @@ from .phase_manager import PhaseSignals, phase1_conditions_met
 logger = logging.getLogger("db_collector_os.collector")
 
 
+def ensure_seed_urls_queued(
+    ctx: CollectorContext, job: dict[str, Any], adapter: Adapter | None = None
+) -> list[str]:
+    """Idempotently enqueue every URL the job's CURRENT config_json.seed_urls
+    names into fetch_queue. Safe to call from any process, any number of
+    times: `FetchQueue.enqueue()` is idempotent per `(job_id, normalized
+    url)` -- a URL already tracked in fetch_queue (any status, including
+    'done') is left completely untouched, never duplicated and never forced
+    to re-fetch. Returns the URLs that were newly added this call (for
+    logging/reporting; an empty list is not an error -- it just means
+    nothing was new).
+
+    This is a standalone function, not just a `BaseCollector` method, so it
+    can also be invoked directly and synchronously by a short-lived CLI
+    process (see `db-collector jobs reseed`) -- guaranteeing a config-added
+    seed reaches the queue immediately from code that is *always* current
+    (a fresh process reads whatever is on disk right now), rather than only
+    ever depending on the long-running worker process's next `run_once()`
+    tick, which serves whatever code it happened to have loaded at its own
+    last start. `BaseCollector.run_once()` still also calls this on every
+    tick as its own, independent guarantee (belt-and-suspenders) -- calling
+    it twice for the same URL from two different processes is harmless.
+    """
+    adapter = adapter or get_adapter(job["adapter"])
+    job_id = job["job_id"]
+    newly_queued: list[str] = []
+    for url in adapter.seed_urls(job):
+        normalized = normalize_url(url)
+        if not normalized:
+            continue
+        already_tracked = ctx.fetch_queue.exists(job_id, normalized)
+        ctx.fetch_queue.enqueue(job_id, url, priority=job.get("priority", 50))
+        if not already_tracked:
+            newly_queued.append(normalized)
+    return newly_queued
+
+
 class RunOutcome:
     def __init__(self):
         self.fetched = 0
@@ -135,9 +172,7 @@ class BaseCollector:
     # -- pipeline steps -----------------------------------------------
 
     def _ensure_seed_urls_queued(self, job: dict[str, Any], adapter: Adapter) -> None:
-        job_id = job["job_id"]
-        for url in adapter.seed_urls(job):
-            self.ctx.fetch_queue.enqueue(job_id, url, priority=job.get("priority", 50))
+        ensure_seed_urls_queued(self.ctx, job, adapter)
 
     def _bootstrap(self, job: dict[str, Any], adapter: Adapter, state: dict[str, Any]) -> None:
         if state.get("seeded"):

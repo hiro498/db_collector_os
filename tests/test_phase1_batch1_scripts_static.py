@@ -69,6 +69,19 @@ def test_main_script_captures_previous_latest_run_id_and_passes_to_watcher():
     assert "--setenv=PHASE1_LIST_URL=" in MAIN_SCRIPT
 
 
+def test_main_script_runs_jobs_reseed_after_sync_before_enable():
+    # The config-seed guarantee (db-collector jobs reseed) must run
+    # synchronously from this fresh script process -- independent of
+    # whether db-collector-worker@1.service has reloaded code -- and must
+    # run after `jobs sync` (so config_json is current) and before `jobs
+    # enable`/`jobs resume` (so the queue is already populated before the
+    # job starts being picked up).
+    sync_idx = MAIN_SCRIPT.index('"$CLI" jobs sync')
+    reseed_idx = MAIN_SCRIPT.index('"$CLI" jobs reseed "$JOB_ID"')
+    enable_idx = MAIN_SCRIPT.index('"$CLI" jobs enable "$JOB_ID"')
+    assert sync_idx < reseed_idx < enable_idx
+
+
 def test_watch_script_has_run_lifecycle_gate():
     assert "RUN_LIFECYCLE_GATE" in WATCH_SCRIPT
     assert "PREVIOUS_LATEST_RUN_ID" in WATCH_SCRIPT

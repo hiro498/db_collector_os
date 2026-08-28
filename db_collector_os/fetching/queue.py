@@ -19,6 +19,16 @@ class FetchQueue:
     def __init__(self, db: Database):
         self.db = db
 
+    def exists(self, job_id: str, url: str) -> bool:
+        """True if a fetch_queue row already exists for this (job_id, url) --
+        any status, including 'done'. `url` is normalized the same way
+        `enqueue()` normalizes it, so callers can pass either form.
+        """
+        url = normalize_url(url)
+        return self.db.query_one(
+            "SELECT 1 FROM fetch_queue WHERE job_id=? AND url=?", (job_id, url)
+        ) is not None
+
     def enqueue(self, job_id: str, url: str, priority: int = 50, max_attempts: int = 5) -> int | None:
         url = normalize_url(url)
         domain = extract_domain(url)

@@ -3,6 +3,7 @@
 Examples:
     db-collector migrate
     db-collector jobs sync
+    db-collector jobs reseed JOB_ID
     db-collector jobs list
     db-collector jobs run JOB_ID
     db-collector jobs pause JOB_ID
@@ -29,6 +30,7 @@ import yaml
 from .candidates import CandidateStore
 from .checkpoint import CheckpointStore
 from .collectors import CollectorContext
+from .collectors.pipeline import ensure_seed_urls_queued
 from .config import AppConfig, load_config
 from .database import Database
 from .fetching import FetchQueue
@@ -185,6 +187,36 @@ def jobs_sync(ctx: click.Context) -> None:
         click.echo(f"synced {path.name} -> {job_id}")
         count += 1
     click.echo(f"{count} job definition(s) synced")
+
+
+@jobs.command("reseed")
+@click.argument("job_id")
+@click.pass_context
+def jobs_reseed(ctx: click.Context, job_id: str) -> None:
+    """Idempotently enqueue this job's CURRENT config_json.seed_urls into
+    fetch_queue, synchronously, from this process. Complements (does not
+    replace) the same guarantee `run_once()` performs on every worker
+    tick -- run this right after `jobs sync` (which is what
+    scripts/run_goodsmile_phase1_batch1.sh does) so a config-added seed
+    reaches the queue immediately, without depending on whether/when the
+    long-running worker process has reloaded code that includes this
+    logic. Never duplicates or force-refetches an already-tracked URL
+    (fetch_queue.enqueue() is idempotent per (job_id, url), any status
+    including 'done').
+    """
+    config: AppConfig = ctx.obj["config"]
+    db = _db(ctx)
+    registry = JobRegistry(db)
+    job = registry.get(job_id)
+    if not job:
+        click.echo(f"no such job: {job_id}", err=True)
+        sys.exit(1)
+    ctx_obj = CollectorContext.build(config, db)
+    newly_queued = ensure_seed_urls_queued(ctx_obj, job)
+    click.echo(json.dumps(
+        {"job_id": job_id, "newly_queued_count": len(newly_queued), "newly_queued": newly_queued},
+        indent=2,
+    ))
 
 
 @jobs.command("list")

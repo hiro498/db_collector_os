@@ -250,6 +250,63 @@ no `current_run_id` is the normal, expected state between executions; a
 worker/CLI path that finds one set must verify (not just trust) that the
 run it names is still genuinely in flight before writing into it.
 
+## Phase 1 batch #1: config seed guarantee (the real VPS retry, round 2)
+
+The FIRST real VPS retry after the fixes above landed showed a split
+result: `RUN_LIFECYCLE_GATE=PASS` (the run-lifecycle fix verified working
+in production) but `NEW_SEED_LIST_PRESENT_IN_QUEUE=NO` /
+`BATCH_FETCHED=0` -- the Scale Figure list seed still never reached
+`fetch_queue`, even though `config_json.seed_urls` on the job row genuinely
+had both URLs (verified directly against the real production job YAML
+shape, reproduced locally via the exact `db-collector jobs sync` code
+path -- see `tests/test_seed_config_guarantee.py`).
+
+**Root cause**: `BaseCollector.run_once()`'s per-tick seed guarantee
+(`_ensure_seed_urls_queued()`, added by the previous fix) is correct in
+isolation -- reproducing the exact reported state (product done, entity
+created, checkpoint `seeded=true`/phase=`collect`/`low_discovery_streak=3`)
+and calling it directly confirms the list URL gets queued. But it only
+ever runs *inside* `db-collector-worker@1.service`'s own `run_once()` call
+on its next poll tick -- a long-running process that keeps whatever code
+it imported at its own last start. The worker-reload gate added earlier
+only restarts the worker when it judges it safe to (no job anywhere
+currently running, so no other job's in-flight execution is disturbed);
+if that precondition isn't met at exactly the moment a fix like this one
+needs to take effect, the batch proceeds with the worker still serving
+older code that predates `_ensure_seed_urls_queued()` entirely -- and the
+run-lifecycle fix (which doesn't depend on a *new* code path being
+present, only on checkpoint state that's *already normally clean between
+executions*) can still report `PASS` under that same stale-worker
+condition, which is exactly why the two gates diverged in that report.
+
+**Fix, made generic (not Good-Smile-specific)**: the seed-enqueue logic
+was extracted out of `BaseCollector` into a standalone function,
+`ensure_seed_urls_queued(ctx, job, adapter=None)`
+(`collectors/pipeline.py`) -- idempotent per `(job_id, url)` exactly as
+before (`FetchQueue.enqueue()`'s existing dedup), but now callable
+directly from a **fresh, short-lived process**, not only from inside the
+long-running worker. A new CLI command, `db-collector jobs reseed
+JOB_ID`, does exactly that. `scripts/run_goodsmile_phase1_batch1.sh` now
+runs it right after `jobs sync` (so `config_json` is current) and before
+`jobs enable`/`jobs resume` -- this guarantees every seed in the job's
+current config reaches `fetch_queue` from code that is *always* current
+(a fresh `.venv/bin/python` process reads whatever this ff-only-merged
+checkout has on disk right now), completely independent of whether or
+when the persistent worker process reloads. `BaseCollector.run_once()`
+still also calls the same function on every tick as its own, independent,
+redundant guarantee -- belt-and-suspenders, harmless to call twice for the
+same URL from two different processes.
+
+This directly answers investigation question 9 (should `_ensure_seed_urls_
+queued()` guarantee config seeds itself, or should the Adapter contract
+change): neither the base `Adapter.seed_urls()` contract nor any adapter
+needed to change -- every adapter already gets `config_json.seed_urls`
+verbatim (`tests/test_seed_config_guarantee.py::
+test_other_adapters_seed_guarantee_unaffected` locks this in for all four
+sample adapters). The gap was entirely about *which process* performs the
+guaranteed-idempotent enqueue and *when*, not about what URLs the config
+promises or how an adapter is allowed to modify them.
+
 ## Phase 1 batch #1 configuration
 
 ```yaml
@@ -313,15 +370,20 @@ untouched (`GOODSMILE_PHASE1_BATCH1=FAIL`, `PRODUCTION_CRAWL_STARTED=NO`)
 -- safe to fix and re-run.
 
 Before enabling the job, the script also records `PREVIOUS_LATEST_RUN_ID`
-(the job's most recent `run_history.run_id`, if any). After the batch
-settles, the watcher compares it against the new `LATEST_RUN_ID` from the
-report and reports `RUN_LIFECYCLE_GATE=PASS`/`FAIL` -- a `FAIL` here (the
-run_id didn't change) means the run-lifecycle bug above has recurred and
-the batch is not a valid result no matter what its counts say. The report
-also states `NEW_SEED_LIST_PRESENT_IN_QUEUE`/`SCALE_LIST_FETCHED` (did the
-Scale Figure list actually get queued and fetched this batch) and explicit
-`HTTP_2XX/403/404/429/5XX_COUNT` lines, all gated in the success/fail
-decision alongside the existing checks.
+(the job's most recent `run_history.run_id`, if any), then runs
+`db-collector jobs sync` followed immediately by `db-collector jobs
+reseed "$JOB_ID"` -- synchronously enqueueing every seed in the job's
+current config from this fresh script process, independent of whatever
+code the persistent worker happens to have loaded (see "config seed
+guarantee" above) -- before `jobs enable`/`jobs resume`. After the batch
+settles, the watcher compares `PREVIOUS_LATEST_RUN_ID` against the new
+`LATEST_RUN_ID` from the report and reports `RUN_LIFECYCLE_GATE=PASS`/
+`FAIL` -- a `FAIL` here (the run_id didn't change) means the run-lifecycle
+bug above has recurred and the batch is not a valid result no matter what
+its counts say. The report also states `NEW_SEED_LIST_PRESENT_IN_QUEUE`/
+`SCALE_LIST_FETCHED` (did the Scale Figure list actually get queued and
+fetched this batch) and explicit `HTTP_2XX/403/404/429/5XX_COUNT` lines,
+all gated in the success/fail decision alongside the existing checks.
 
 SSH-disconnect-safe: preflight + enabling the job run in your shell; the
 actual crawl always runs through the already-persistent

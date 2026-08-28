@@ -308,6 +308,18 @@ print(row['run_id'] if row else 'none')
     echo "PREVIOUS_LATEST_RUN_ID=$PREVIOUS_LATEST_RUN_ID"
 
     "$CLI" jobs sync || { echo "[FATAL] jobs sync failed"; return 1 2>/dev/null || true; }
+
+    # Guarantee this run's config seed_urls (both, after this revision's
+    # config expansion) reach fetch_queue synchronously, from THIS process --
+    # not by depending on db-collector-worker@1.service having reloaded code
+    # that would otherwise enqueue them on its next run_once() tick. This
+    # process always runs whatever is on disk right now (ff-only merge above
+    # already brought it up to date), so it can't ever be stale the way a
+    # long-running worker process can. Idempotent: never duplicates or
+    # force-refetches an already-tracked URL.
+    RESEED_OUTPUT="$("$CLI" jobs reseed "$JOB_ID" 2>&1)" || { echo "[FATAL] jobs reseed failed"; echo "$RESEED_OUTPUT"; return 1 2>/dev/null || true; }
+    echo "$RESEED_OUTPUT"
+
     # jobs sync resets `enabled` to the YAML's value (false) -- enable it for
     # real now, against the running registry.
     "$CLI" jobs enable "$JOB_ID" || { echo "[FATAL] jobs enable failed"; return 1 2>/dev/null || true; }
