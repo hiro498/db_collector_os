@@ -23,10 +23,21 @@ class RunHistoryStore:
         )
         return run_id
 
-    def finish(self, run_id: str, status: str, **counts: int) -> None:
-        row = self.db.query_one("SELECT started_at FROM run_history WHERE run_id=?", (run_id,))
+    def get(self, run_id: str) -> dict[str, Any] | None:
+        return self.db.query_one("SELECT * FROM run_history WHERE run_id=?", (run_id,))
+
+    def finish(self, run_id: str, status: str, **counts: int) -> bool:
+        """Finalize a run. run_history is immutable execution history: a row
+        that has already been finalized (status != running, or missing
+        entirely) is never re-finalized -- returns False and leaves it
+        untouched instead of silently overwriting its finished_at/counts.
+        Returns True if this call actually finalized the row.
+        """
+        row = self.db.query_one("SELECT started_at, status FROM run_history WHERE run_id=?", (run_id,))
+        if not row or row["status"] != RunStatus.RUNNING:
+            return False
         duration = None
-        if row and row["started_at"]:
+        if row["started_at"]:
             try:
                 started = datetime.fromisoformat(row["started_at"])
                 duration = (datetime.now(started.tzinfo) - started).total_seconds()
@@ -45,12 +56,20 @@ class RunHistoryStore:
                 fields[key] = counts[key]
         set_clause = ", ".join(f"{k}=?" for k in fields)
         self.db.execute(
-            f"UPDATE run_history SET {set_clause} WHERE run_id=?", (*fields.values(), run_id)
+            f"UPDATE run_history SET {set_clause} WHERE run_id=? AND status=?",
+            (*fields.values(), run_id, RunStatus.RUNNING),
         )
+        return True
 
     def for_job(self, job_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        # started_at has only second-level precision (see now_iso()), so two
+        # runs created within the same second -- entirely possible for a
+        # fast job or a rapid retry -- would tie on it alone. `rowid` (every
+        # ordinary SQLite table has one; run_history's PK is TEXT, not
+        # INTEGER, so it isn't aliased to rowid) breaks the tie in actual
+        # insertion order, so "most recent" is never ambiguous.
         return self.db.query(
-            "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC LIMIT ?",
+            "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT ?",
             (job_id, limit),
         )
 

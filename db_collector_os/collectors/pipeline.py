@@ -16,7 +16,7 @@ from ..adapters import Adapter, get_adapter
 from ..adapters.base import ExtractedRecord
 from ..extraction.common import extract_common
 from ..fetching.urlnorm import extract_domain
-from ..models.enums import CandidateStatus, JobPhase, ReviewReason
+from ..models.enums import CandidateStatus, JobPhase, ReviewReason, RunStatus
 from ..normalization import normalize_address, normalize_name, normalize_telephone, normalize_url
 from .context import CollectorContext
 from .phase_manager import PhaseSignals, phase1_conditions_met
@@ -65,11 +65,32 @@ class BaseCollector:
         checkpoint = ctx.checkpoints.load(job_id)
         state = checkpoint["state"]
 
+        # current_run_id in checkpoint state is ONLY a crash-resume marker:
+        # if the worker died inside run_once() before run_job_and_record()
+        # could finalize it, the run_history row is still status='running'
+        # and it's correct to continue writing into that same row. Any other
+        # value here (stale/corrupted state, e.g. left over from before this
+        # resume mechanism existed) must never be reused -- run_history is
+        # immutable execution history, so a new execution always gets a new
+        # run_id unless it is genuinely resuming an unfinished one.
         run_id = state.get("current_run_id")
-        if not run_id:
+        existing_run = ctx.run_history.get(run_id) if run_id else None
+        if not existing_run or existing_run["status"] != RunStatus.RUNNING:
             run_id = ctx.run_history.start(job_id)
             state["current_run_id"] = run_id
             ctx.checkpoints.save(job_id, run_id, job["phase"], state)
+
+        # Idempotent seed upsert: derived from the job's CURRENT config on
+        # every execution, not gated behind the one-time "seeded" bootstrap
+        # flag below. A job config that grows new seed_urls after the
+        # bootstrap phase already completed (e.g. adding a listing-page
+        # seed on top of a single already-fetched product URL) gets the
+        # new seed queued on the very next run instead of being silently
+        # skipped forever. fetch_queue.enqueue() already no-ops for a URL
+        # already tracked (any status, including 'done'), so this never
+        # duplicates rows and never forces an already-fetched seed to
+        # re-fetch -- that stays owned by requeue_for_revalidation().
+        self._ensure_seed_urls_queued(job, adapter)
 
         if job["phase"] == JobPhase.BOOTSTRAP:
             self._bootstrap(job, adapter, state)
@@ -113,11 +134,14 @@ class BaseCollector:
 
     # -- pipeline steps -----------------------------------------------
 
+    def _ensure_seed_urls_queued(self, job: dict[str, Any], adapter: Adapter) -> None:
+        job_id = job["job_id"]
+        for url in adapter.seed_urls(job):
+            self.ctx.fetch_queue.enqueue(job_id, url, priority=job.get("priority", 50))
+
     def _bootstrap(self, job: dict[str, Any], adapter: Adapter, state: dict[str, Any]) -> None:
         if state.get("seeded"):
             return
-        for url in adapter.seed_urls(job):
-            self.ctx.fetch_queue.enqueue(job["job_id"], url, priority=job.get("priority", 50))
         self.ctx.discovery.run_seed_discovery(job)
         state["seeded"] = True
 

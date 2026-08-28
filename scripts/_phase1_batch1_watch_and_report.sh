@@ -17,6 +17,8 @@ JOB_ID="job_prod_figure_official_site"
 TIMEOUT_SECONDS="${PHASE1_WATCH_TIMEOUT_SECONDS:-1800}"
 POLL_SECONDS="${PHASE1_WATCH_POLL_SECONDS:-15}"
 ADMIN_PORT="${DB_COLLECTOR_ADMIN_PORT:-8787}"
+PREVIOUS_LATEST_RUN_ID="${PHASE1_PREVIOUS_LATEST_RUN_ID:-none}"
+LIST_URL="${PHASE1_LIST_URL:-https://www.goodsmile.com/en/scalefigure_list}"
 
 cd "$APP_DIR" || { echo "[FATAL] app dir not found: $APP_DIR"; exit 1; }
 # `exit` is fine in this file specifically: it only ever runs inside its own
@@ -121,6 +123,33 @@ else
 fi
 
 log ""
+log "--- seed URL queue state (Scale Figure list) ---"
+SEED_QUEUE_STATE="$("$PY" -c "
+from db_collector_os.config import load_config
+from db_collector_os.database import Database
+cfg = load_config('config/default.yaml')
+db = Database(cfg.db_path)
+row = db.query_one(\"SELECT status, last_http_status FROM fetch_queue WHERE job_id=? AND url=?\", ('$JOB_ID', '$LIST_URL'))
+if not row:
+    print('absent,none')
+else:
+    print(f\"{row['status']},{row['last_http_status']}\")
+" 2>/dev/null)"
+SEED_QUEUE_STATUS="${SEED_QUEUE_STATE%,*}"
+SEED_QUEUE_HTTP="${SEED_QUEUE_STATE#*,}"
+if [ "$SEED_QUEUE_STATUS" = "absent" ]; then
+    log "NEW_SEED_LIST_PRESENT_IN_QUEUE=NO"
+    log "SCALE_LIST_FETCHED=NO"
+else
+    log "NEW_SEED_LIST_PRESENT_IN_QUEUE=YES"
+    if [ "$SEED_QUEUE_STATUS" = "done" ] && [ "$SEED_QUEUE_HTTP" = "200" ]; then
+        log "SCALE_LIST_FETCHED=YES"
+    else
+        log "SCALE_LIST_FETCHED=NO (status=$SEED_QUEUE_STATUS http=$SEED_QUEUE_HTTP)"
+    fi
+fi
+
+log ""
 log "--- resource state after batch ---"
 "$PY" -c "
 from db_collector_os.config import load_config
@@ -138,6 +167,7 @@ print('RESOURCE_AFTER_can_admit_new_job=' + str(ok) + ' - ' + reason)
 " 2>&1 | tee -a "$REPORT_FILE"
 
 # -- success gate ------------------------------------------------------------
+LATEST_RUN_ID="$(grep -oE 'LATEST_RUN_ID=[A-Za-z0-9_]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 LATEST_RUN_ERROR_COUNT="$(grep -oE 'LATEST_RUN_ERROR_COUNT=-?[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 LATEST_RUN_STATUS="$(grep -oE 'LATEST_RUN_STATUS=[a-z_]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
 BATCH_FETCHED="$(grep -oE 'BATCH_FETCHED=[0-9]+' "$REPORT_FILE" | tail -1 | cut -d= -f2)"
@@ -164,7 +194,26 @@ log "===================================================================="
 log " Phase 1 batch #1 -- success gate evaluation"
 log "===================================================================="
 
+log "PREVIOUS_LATEST_RUN_ID=$PREVIOUS_LATEST_RUN_ID"
+log "CURRENT_LATEST_RUN_ID=${LATEST_RUN_ID:-none}"
+# run_history is immutable execution history: this batch's execution MUST
+# have created its own fresh run_history row. If CURRENT_LATEST_RUN_ID is
+# identical to whatever was already the latest run_id before this batch
+# started (and there WAS a previous run to compare against), the run
+# lifecycle bug has recurred -- an old row got reused/re-finalized instead
+# of a new one being started -- and this batch is not a valid result no
+# matter what its counts say.
+if [ "$PREVIOUS_LATEST_RUN_ID" != "none" ] && [ "${LATEST_RUN_ID:-none}" = "$PREVIOUS_LATEST_RUN_ID" ]; then
+    log "RUN_LIFECYCLE_GATE=FAIL"
+else
+    log "RUN_LIFECYCLE_GATE=PASS"
+fi
+
 GATE_FAIL_REASONS=""
+if [ "$PREVIOUS_LATEST_RUN_ID" != "none" ] && [ "${LATEST_RUN_ID:-none}" = "$PREVIOUS_LATEST_RUN_ID" ]; then
+    GATE_FAIL_REASONS="${GATE_FAIL_REASONS}run_id_reused(${LATEST_RUN_ID:-none});"
+fi
+[ "${LATEST_RUN_ID:-none}" != "none" ] || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}no_run_history_row_created;"
 INTEGRITY_OK=0
 [ "$INTEGRITY_OUTPUT" = "ok" ] && INTEGRITY_OK=1
 [ "$INTEGRITY_OK" = "1" ] || GATE_FAIL_REASONS="${GATE_FAIL_REASONS}db_integrity_not_ok;"

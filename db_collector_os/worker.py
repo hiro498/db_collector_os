@@ -50,13 +50,19 @@ def run_job_and_record(
         if logger:
             logger.exception("job %s failed: %s", job_id, exc)
         checkpoint = ctx.checkpoints.load(job_id)
-        run_id = checkpoint["state"].get("current_run_id")
-        if not run_id:
-            # The failure happened before run_once() reached run_history.start()
-            # (e.g. an unresolvable adapter name) -- still record a failed run
-            # rather than leaving this invocation with no run_history trace at all.
+        state = checkpoint["state"]
+        run_id = state.get("current_run_id")
+        existing_run = ctx.run_history.get(run_id) if run_id else None
+        if not existing_run or existing_run["status"] != RunStatus.RUNNING:
+            # Either the failure happened before run_once() reached
+            # run_history.start() (e.g. an unresolvable adapter name), or
+            # current_run_id was stale/already-finalized -- either way,
+            # run_history is immutable execution history, so this failure
+            # gets its own fresh row rather than touching an old one.
             run_id = ctx.run_history.start(job_id)
         ctx.run_history.finish(run_id, RunStatus.FAILED, error_count=1)
+        state.pop("current_run_id", None)
+        ctx.checkpoints.save(job_id, None, checkpoint["phase"] or job.get("phase"), state)
         jobs.finish(job_id, JobStatus.FAILED)
         return None, JobStatus.FAILED
 

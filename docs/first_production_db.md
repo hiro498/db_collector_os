@@ -158,6 +158,98 @@ DB's population, regardless of which company actually makes it;
 `entities.data_json.brand`/`.manufacturer` (whichever company the page
 itself names) are tracked as separate fields, never conflated.
 
+## Phase 1 batch #1: run lifecycle & seed idempotency bugs (found from the real VPS retry)
+
+The first real Phase 1 batch #1 attempt on the VPS (2026-08-28, after the
+adapter-reload fix below) reported `GOODSMILE_PHASE1_BATCH1=FAIL` with
+`fetched_not_gt_0;inserted_not_gt_0` even though the job's `run_history` row
+showed `status=completed`, `error_count=0`. Two further, general (not
+Good-Smile-specific) bugs were found and fixed:
+
+**1. Run lifecycle: an old run_history row was reused and re-finalized.**
+The reported `run_id` was the *same* row created by the 2026-08-27 single-
+product proof -- its `started_at` never changed, but `finished_at`/`status`/
+all counts got silently overwritten by the retry, zeroing out the proof's
+real numbers. Root cause: `BaseCollector.run_once()` (`collectors/
+pipeline.py`) trusted `checkpoint.state["current_run_id"]` whenever it was
+present, with no check that the run it pointed at was actually still
+in-flight. That key exists as a **crash-resume marker only** -- if the
+worker process dies mid-`run_once()` before `run_job_and_record()` can
+finalize the run, resuming into the *same* `run_history` row (still
+`status='running'`) is correct. But any other case -- most concretely, a
+row left over from before this resume mechanism existed, as on the VPS DB
+here -- must never be reused. Fixed: `run_once()` now calls
+`ctx.run_history.get(run_id)` and only reuses it when `status ==
+RunStatus.RUNNING`; otherwise it starts a fresh run
+(`ctx.run_history.start()`), exactly like a brand-new execution.
+`RunHistoryStore.finish()` also gained its own independent guard --
+`UPDATE ... WHERE run_id=? AND status='running'`, a no-op otherwise -- so
+even a future bug elsewhere that tries to finalize an already-finalized row
+can't corrupt it: **`run_history` is immutable execution history** once a
+row leaves `status='running'`. `worker.py`'s failure path (the
+`run_job_and_record()` except-branch) got the identical guard, and now
+also clears `current_run_id` from checkpoint state after a failure (it
+previously didn't, which is exactly how a dangling reference like this
+gets created in the first place). See `tests/test_run_lifecycle.py`.
+
+A related, narrower bug found while writing the regression tests: every
+"most recent run" query (`RunHistoryStore.for_job()`, the batch report's
+`LATEST_RUN_*`/`PREVIOUS_LATEST_RUN_ID` queries) used `ORDER BY started_at
+DESC LIMIT 1`. `started_at` (`now_iso()`) has only second-level precision,
+so two runs created within the same second -- entirely plausible for a
+fast job or an immediate retry -- tie, and SQLite doesn't guarantee which
+tied row "DESC" returns first. All of these now order by `started_at DESC,
+rowid DESC` (every ordinary SQLite table has an implicit `rowid`;
+`run_history`'s primary key is `TEXT`, not `INTEGER`, so it isn't aliased
+away), which breaks the tie in true insertion order.
+
+**2. Seed idempotency: a config-added seed_urls was silently never queued.**
+The Phase 1 config change (this file's "Phase 1 discovery method" section)
+added `LIST_URL` as a seed on top of the already-fetched single product
+URL from the proof. But `BaseCollector._bootstrap()` -- the only place that
+enqueued `config_json.seed_urls` at all -- only ever runs when
+`job['phase'] == JobPhase.BOOTSTRAP`, and the job's phase had already
+advanced to `discovery` after the proof run. So the newly-added seed was
+never enqueued, no matter how many times the job retried: `checkpoint.
+state["seeded"] = True` from the proof effectively gated seed enqueueing
+forever, for *any* future config change, not just a one-time bootstrap.
+Fixed: seed-URL enqueueing was split out of `_bootstrap()` into its own
+`_ensure_seed_urls_queued()`, called unconditionally at the top of every
+single `run_once()`, regardless of phase.  This is safe and never causes
+duplicate fetches or forced re-fetches of already-`done` URLs, because
+`FetchQueue.enqueue()` was already idempotent per `(job_id, url)` -- it
+returns the existing `queue_id` untouched if a row for that URL already
+exists in any status. `checkpoint.state["seeded"]` still exists and still
+gates the one-time discovery-methods kick inside `_bootstrap()` (robots/
+sitemap/etc.), which is unrelated to the seed_urls enqueue bug. See
+`tests/test_seed_idempotency.py` and
+`tests/test_goodsmile_phase1_run_lifecycle_integration.py` (the realistic
+combined regression: proof run -> config expansion -> retry).
+
+**3. Worker adapter reload.** The same VPS attempt also hit `Unknown
+adapter: figure_official_site` immediately after a `git pull` landed the
+adapter file -- `db-collector-worker@1.service` is a long-running process
+that keeps whatever Python modules it imported at its own last start;
+pulling new code onto disk does not make a running process re-import
+anything. `scripts/run_goodsmile_phase1_batch1.sh`'s preflight now includes
+a worker-reload gate, safely scoped: it only restarts
+`db-collector-worker@1.service` (never scheduler/admin) when the
+production job is still disabled and no job anywhere is currently
+`status='running'` (so no other job's in-flight execution is ever
+disturbed), followed by a `figure_official_site` adapter import smoke test
+(`FIGURE_ADAPTER_IMPORT=PASS`) that blocks the batch if it still fails.
+
+**Checkpoint semantics, stated explicitly**: `checkpoints.state` is
+collection *progress/resume* state (`seeded`, `low_discovery_streak`, ...)
+plus, transiently, `current_run_id` as a crash-resume pointer into
+`run_history`'s *execution identity*. These are deliberately different
+concerns living in the same JSON blob for convenience -- `current_run_id`
+is set right before a run starts and always cleared (`state.pop(...)`)
+once that run is finalized, success or failure. A job's checkpoint having
+no `current_run_id` is the normal, expected state between executions; a
+worker/CLI path that finds one set must verify (not just trust) that the
+run it names is still genuinely in flight before writing into it.
+
 ## Phase 1 batch #1 configuration
 
 ```yaml
@@ -203,16 +295,33 @@ cd /root/tools/db_collector_os
 ./scripts/run_goodsmile_phase1_batch1.sh
 ```
 
-Preflight (all in your foreground shell, all read-only except the backup
-and the job-registry sync/enable at the very end, only reached if every
-check passes): git clean/fetch/ff-only/HEAD-vs-origin, DB backup, DB
-integrity, systemd services active, Admin UI HTTP 200, the existing
-Resource Controller's admission gate (reads current CPU/RAM/swap/disk/load
--- never modifies swap or thresholds), a live robots.txt re-check against
-both seed URLs, and confirmation the 4 sample jobs are still disabled. Any
-failure prints `[BLOCK]`/`[FATAL]` and leaves the job untouched
-(`GOODSMILE_PHASE1_BATCH1=FAIL`, `PRODUCTION_CRAWL_STARTED=NO`) -- safe to
-fix and re-run.
+Preflight (all in your foreground shell, all read-only except the backup,
+the worker restart, and the job-registry sync/enable at the very end, only
+reached if every check passes): git clean working tree, `git fetch origin
+--prune` + an actual `git merge --ff-only` when local HEAD is behind origin
+(never rebase/force-merge -- blocks on genuine divergence instead), DB
+backup, DB integrity, a `compileall` syntax check, the worker-reload gate
+(restarts only `db-collector-worker@1.service`, only when the production
+job is still disabled and no job anywhere is currently running, followed by
+a `figure_official_site` adapter import smoke test -- see "run lifecycle &
+seed idempotency bugs" above), systemd services active, Admin UI HTTP 200,
+the existing Resource Controller's admission gate (reads current CPU/RAM/
+swap/disk/load -- never modifies swap or thresholds), a live robots.txt
+re-check against both seed URLs, and confirmation the 4 sample jobs are
+still disabled. Any failure prints `[BLOCK]`/`[FATAL]` and leaves the job
+untouched (`GOODSMILE_PHASE1_BATCH1=FAIL`, `PRODUCTION_CRAWL_STARTED=NO`)
+-- safe to fix and re-run.
+
+Before enabling the job, the script also records `PREVIOUS_LATEST_RUN_ID`
+(the job's most recent `run_history.run_id`, if any). After the batch
+settles, the watcher compares it against the new `LATEST_RUN_ID` from the
+report and reports `RUN_LIFECYCLE_GATE=PASS`/`FAIL` -- a `FAIL` here (the
+run_id didn't change) means the run-lifecycle bug above has recurred and
+the batch is not a valid result no matter what its counts say. The report
+also states `NEW_SEED_LIST_PRESENT_IN_QUEUE`/`SCALE_LIST_FETCHED` (did the
+Scale Figure list actually get queued and fetched this batch) and explicit
+`HTTP_2XX/403/404/429/5XX_COUNT` lines, all gated in the success/fail
+decision alongside the existing checks.
 
 SSH-disconnect-safe: preflight + enabling the job run in your shell; the
 actual crawl always runs through the already-persistent

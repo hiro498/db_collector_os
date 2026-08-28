@@ -115,6 +115,71 @@ db_collector_phase1_batch1_goodsmile() {
         SKIP_START=1
     fi
 
+    # -- worker reload gate: prevent the worker from serving a stale in-memory --
+    # -- adapter registry after `git pull`/`git merge --ff-only` above landed --
+    # -- new/changed adapter code (this is what caused "Unknown adapter: -------
+    # -- figure_official_site" on a previous batch attempt -- a long-running --
+    # -- worker process keeps its Python modules imported from whenever it ----
+    # -- last started, regardless of what's now on disk). Restarts ONLY the ---
+    # -- worker (never scheduler/admin), and only when it's safe to: the -------
+    # -- production job is still disabled at this point in the script (it's ---
+    # -- enabled further below, never before this), and no job anywhere is -----
+    # -- currently mid-execution, so no other job's in-flight run is disturbed.
+    echo; echo "--- preflight: worker reload (adapter code freshness) ---"
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        local PROD_JOB_ENABLED
+        PROD_JOB_ENABLED="$("$PY" -c "
+from db_collector_os.config import load_config
+from db_collector_os.database import Database
+from db_collector_os.job_registry import JobRegistry
+cfg = load_config('config/default.yaml')
+db = Database(cfg.db_path)
+job = JobRegistry(db).get('$JOB_ID')
+print(bool(job and job.get('enabled')))
+" 2>/dev/null)"
+        local ANY_ACTIVE_RUN
+        ANY_ACTIVE_RUN="$("$PY" -c "
+from db_collector_os.config import load_config
+from db_collector_os.database import Database
+cfg = load_config('config/default.yaml')
+db = Database(cfg.db_path)
+rows = db.query(\"SELECT job_id FROM jobs WHERE status='running'\")
+print(','.join(r['job_id'] for r in rows))
+" 2>/dev/null)"
+        if [ "$PROD_JOB_ENABLED" = "True" ]; then
+            echo "[BLOCK] $JOB_ID is already enabled -- refusing to restart the worker mid-job. Investigate manually."
+            SKIP_START=1
+        elif [ -n "$ANY_ACTIVE_RUN" ]; then
+            echo "[WARN] job(s) currently running ($ANY_ACTIVE_RUN) -- not restarting the worker so their"
+            echo "       in-flight execution isn't disturbed. If figure_official_site adapter import fails"
+            echo "       below, re-run this script once those jobs are idle."
+        else
+            echo "OK: $JOB_ID disabled, no job currently running -- safe to restart the worker"
+            systemctl restart db-collector-worker@1.service 2>&1
+            sleep 2
+            if systemctl is-active --quiet db-collector-worker@1.service; then
+                echo "OK: db-collector-worker@1.service active after restart"
+            else
+                echo "[BLOCK] db-collector-worker@1.service failed to become active after restart"
+                SKIP_START=1
+            fi
+        fi
+    else
+        echo "[WARN] systemd not available here -- cannot restart/verify the worker"
+    fi
+
+    echo "--- adapter import smoke test (figure_official_site) ---"
+    if "$PY" -c "
+from db_collector_os.adapters import get_adapter
+adapter = get_adapter('figure_official_site')
+print('FIGURE_ADAPTER_IMPORT=PASS')
+" 2>&1; then
+        :
+    else
+        echo "[BLOCK] figure_official_site adapter failed to import -- do not proceed"
+        SKIP_START=1
+    fi
+
     # -- services active ----------------------------------------------------------
     echo; echo "--- preflight: services active ---"
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -226,6 +291,22 @@ print(','.join(bad))
         return 0 2>/dev/null || true
     fi
 
+    # -- capture the run_id landscape BEFORE this batch, so the watcher can ----
+    # -- prove afterward that a genuinely NEW run_history row was created ------
+    # -- (run_history is immutable execution history -- reusing/re-finalizing --
+    # -- an old row is a bug, not a valid retry outcome). ------------------------
+    local PREVIOUS_LATEST_RUN_ID
+    PREVIOUS_LATEST_RUN_ID="$("$PY" -c "
+from db_collector_os.config import load_config
+from db_collector_os.database import Database
+cfg = load_config('config/default.yaml')
+db = Database(cfg.db_path)
+row = db.query_one('SELECT run_id FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1', ('$JOB_ID',))
+print(row['run_id'] if row else 'none')
+" 2>/dev/null)"
+    PREVIOUS_LATEST_RUN_ID="${PREVIOUS_LATEST_RUN_ID:-none}"
+    echo "PREVIOUS_LATEST_RUN_ID=$PREVIOUS_LATEST_RUN_ID"
+
     "$CLI" jobs sync || { echo "[FATAL] jobs sync failed"; return 1 2>/dev/null || true; }
     # jobs sync resets `enabled` to the YAML's value (false) -- enable it for
     # real now, against the running registry.
@@ -254,6 +335,8 @@ print(','.join(bad))
             --description="DB Collector OS Phase 1 batch #1 watcher (Good Smile)" \
             --collect \
             --setenv=DB_COLLECTOR_APP_DIR="$APP_DIR" \
+            --setenv=PHASE1_PREVIOUS_LATEST_RUN_ID="$PREVIOUS_LATEST_RUN_ID" \
+            --setenv=PHASE1_LIST_URL="$LIST_URL" \
             bash "$APP_DIR/scripts/_phase1_batch1_watch_and_report.sh" \
             && echo "OK: watcher started as systemd unit '$WATCH_UNIT'" \
             || echo "[WARN] systemd-run failed to start the watcher -- job is still enabled and will still run via the worker"

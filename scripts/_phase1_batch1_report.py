@@ -30,7 +30,7 @@ def main() -> int:
 
     print("--- run_history (most recent 5) ---")
     for row in db.query(
-        "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC LIMIT 5", (job_id,)
+        "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 5", (job_id,)
     ):
         print(dict(row))
 
@@ -128,8 +128,11 @@ def main() -> int:
     checkpoint_row = db.query_one("SELECT updated_at FROM checkpoints WHERE job_id=?", (job_id,))
     print(f"checkpoint_updated_at={checkpoint_row['updated_at'] if checkpoint_row else None}")
 
+    # -- historical totals (cumulative across EVERY run_history row this job -----
+    # -- has ever had -- lifetime figures, NEVER used for the batch success --
+    # -- gate; that must look only at the latest single execution, below). -----
     print()
-    print("--- batch totals (sum of run_history across every run this job has had) ---")
+    print("--- historical totals (sum of run_history across every run this job has had) ---")
     totals = db.query_one(
         "SELECT COALESCE(SUM(fetched_count),0) AS fetched, COALESCE(SUM(inserted_count),0) AS inserted, "
         "COALESCE(SUM(updated_count),0) AS updated, COALESCE(SUM(duplicate_count),0) AS duplicates, "
@@ -138,28 +141,40 @@ def main() -> int:
         "FROM run_history WHERE job_id=?",
         (job_id,),
     )
-    print(f"FETCHED={totals['fetched']}")
-    print(f"INSERTED={totals['inserted']}")
-    print(f"UPDATED={totals['updated']}")
-    print(f"DUPLICATES={totals['duplicates']}")
-    print(f"REVIEWS={totals['reviews']}")
-    print(f"ERRORS={totals['errors']}")
-    print(f"NEW_ENTITIES={totals['inserted']}")
+    print(f"HISTORICAL_FETCHED={totals['fetched']}")
+    print(f"HISTORICAL_INSERTED={totals['inserted']}")
+    print(f"HISTORICAL_UPDATED={totals['updated']}")
+    print(f"HISTORICAL_DUPLICATES={totals['duplicates']}")
+    print(f"HISTORICAL_REVIEWS={totals['reviews']}")
+    print(f"HISTORICAL_ERRORS={totals['errors']}")
+    print(f"HISTORICAL_RUN_COUNT={totals['n_runs']}")
 
+    # -- latest execution only -- this, not the historical totals above, is ----
+    # -- what the batch success/fail gate must evaluate: a run_history row is --
+    # -- immutable once finalized, so exactly one row corresponds to "this ----
+    # -- batch's execution" and its counts are never mixed with any other run.
     print()
-    print("--- summary (machine-parsed by the calling shell script) ---")
+    print("--- latest run (this execution only -- machine-parsed by the calling shell script) ---")
     latest_run = db.query_one(
-        "SELECT error_count, status AS run_status FROM run_history WHERE job_id=? "
-        "ORDER BY started_at DESC LIMIT 1",
+        "SELECT run_id, status AS run_status, started_at, finished_at, discovered_count, "
+        "fetched_count, inserted_count, updated_count, duplicate_count, review_count, error_count "
+        "FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
         (job_id,),
     )
-    print(f"LATEST_RUN_ERROR_COUNT={latest_run['error_count'] if latest_run else -1}")
+    print(f"LATEST_RUN_ID={latest_run['run_id'] if latest_run else 'none'}")
     print(f"LATEST_RUN_STATUS={latest_run['run_status'] if latest_run else 'none'}")
+    print(f"LATEST_RUN_STARTED_AT={latest_run['started_at'] if latest_run else 'none'}")
+    print(f"LATEST_RUN_FINISHED_AT={latest_run['finished_at'] if latest_run else 'none'}")
+    print(f"LATEST_RUN_ERROR_COUNT={latest_run['error_count'] if latest_run else -1}")
     print(f"OPEN_REVIEW_COUNT={n_open_review}")
     print(f"ENTITY_COUNT={n_entities}")
-    print(f"BATCH_FETCHED={totals['fetched']}")
-    print(f"BATCH_INSERTED={totals['inserted']}")
-    print(f"BATCH_ERRORS={totals['errors']}")
+    print(f"BATCH_DISCOVERED={latest_run['discovered_count'] if latest_run else 0}")
+    print(f"BATCH_FETCHED={latest_run['fetched_count'] if latest_run else 0}")
+    print(f"BATCH_INSERTED={latest_run['inserted_count'] if latest_run else 0}")
+    print(f"BATCH_UPDATED={latest_run['updated_count'] if latest_run else 0}")
+    print(f"BATCH_DUPLICATES={latest_run['duplicate_count'] if latest_run else 0}")
+    print(f"BATCH_REVIEWS={latest_run['review_count'] if latest_run else 0}")
+    print(f"BATCH_ERRORS={latest_run['error_count'] if latest_run else 0}")
 
     db.close()
     return 0
