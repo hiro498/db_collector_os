@@ -185,6 +185,7 @@ def test_run_lifecycle_fix_still_holds_alongside_seed_guarantee(app_config, db):
     ctx.run_history.finish(old_run, "completed", fetched_count=1, inserted_count=1, error_count=0)
 
     worker = Worker(app_config, worker_id="seed-guarantee-lifecycle-worker", db=db)
+    registry.set_enabled(job_id, True)
     registry.mark_queued(job_id)
     worker.run_one_job()
 
@@ -198,7 +199,7 @@ def test_run_lifecycle_fix_still_holds_alongside_seed_guarantee(app_config, db):
 # -- Test E: realistic production shape, via the real `jobs reseed` CLI --
 
 
-def test_jobs_reseed_cli_reaches_real_production_shape(tmp_path):
+def test_jobs_reseed_cli_reaches_real_production_shape(tmp_path, monkeypatch):
     """Exercises the exact command scripts/run_goodsmile_phase1_batch1.sh
     now runs (`db-collector jobs reseed <job_id>`) as a real subprocess
     against a job created from the real production YAML -- proving the
@@ -206,6 +207,8 @@ def test_jobs_reseed_cli_reaches_real_production_shape(tmp_path):
     long-running worker's in-memory code.
     """
     home = tmp_path / "var"
+    monkeypatch.setenv("DB_COLLECTOR_HOME", str(home))
+    monkeypatch.setenv("DB_COLLECTOR_DB_PATH", "reseed_cli_test.sqlite3")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({"home_dir": str(home), "db_path": "reseed_cli_test.sqlite3"}), encoding="utf-8")
 

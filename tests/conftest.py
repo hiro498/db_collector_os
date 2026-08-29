@@ -58,3 +58,19 @@ def insert_job(db: Database, job_id: str = "job1", **overrides) -> str:
 @pytest.fixture
 def job_id(db: Database) -> str:
     return insert_job(db)
+
+@pytest.fixture(autouse=True)
+def _isolate_db_collector_env(monkeypatch):
+    monkeypatch.setattr("db_collector_os.config._load_dotenv_if_present", lambda: None)
+    for key in (
+        "DB_COLLECTOR_HOME",
+        "DB_COLLECTOR_DB_PATH",
+        "DB_COLLECTOR_CONFIG",
+        "DB_COLLECTOR_ADMIN_HOST",
+        "DB_COLLECTOR_ADMIN_PORT",
+        "DB_COLLECTOR_USER_AGENT",
+        "DB_COLLECTOR_SEARCH_PROVIDER",
+        "DB_COLLECTOR_SEARCH_API_KEY",
+        "DB_COLLECTOR_LOG_LEVEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
