@@ -83,3 +83,20 @@ def test_not_saturated_while_new_discovery_rate_high(db, job_id):
         rh.record_discovery_stats(job_id, run_id, discovered_total=100, new_candidates=50, duplicate_candidates=50, accepted=50, rejected=0)
     saturated, _reason = is_saturated(rh, job_id, SaturationConfig(window_runs=5, new_rate_threshold=0.05, min_runs_before_check=3))
     assert not saturated
+
+
+def test_zero_discovered_total_is_not_saturated(db, job_id):
+    """Regression: discovered_total=0 across every run (discovery never
+    actually found anything -- e.g. a listing seed never got fetched) used
+    to satisfy the "new-discovery rate <= threshold" saturation check
+    trivially (0/0 -> rate 0.0), letting Phase 1 "complete" without any
+    real discovery ever having run. Zero activity must never count as
+    saturation -- only a real, tapering-off rate does.
+    """
+    rh = RunHistoryStore(db)
+    for _ in range(5):
+        run_id = rh.start(job_id)
+        rh.record_discovery_stats(job_id, run_id, discovered_total=0, new_candidates=0, duplicate_candidates=0, accepted=0, rejected=0)
+    saturated, reason = is_saturated(rh, job_id, SaturationConfig(window_runs=5, new_rate_threshold=0.05, min_runs_before_check=3))
+    assert not saturated
+    assert "discovered_total is 0" in reason

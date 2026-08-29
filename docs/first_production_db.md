@@ -345,6 +345,107 @@ adds (verified by `tests/test_production_job_figure.py`).
 enabling happens only on the VPS via `db-collector jobs enable` (see
 `scripts/run_goodsmile_phase1_batch1.sh`), never by flipping the YAML.
 
+## Phase 1 batch #2: proving real multi-URL population growth
+
+Batch #1 (and the two fixes above) proved the pipeline end to end on a
+single known product page. Before running a batch meant to actually grow
+the population from the Scale Figure list, three more gaps were found and
+closed:
+
+**Premature Phase 1 completion (discovery saturation on zero activity).**
+`discovery/saturation.py::is_saturated()` computed a new-candidate rate as
+`new_candidates / discovered_total`, falling back to `0.0` whenever
+`discovered_total` was `0` (`(new/total) if total else 0.0`).
+`discovered_total` is the job's *cumulative* candidate count as of that
+run -- so `0` specifically means discovery has never found a single
+candidate across the job's whole history. A trivial `0.0 <= threshold`
+"rate" on every such run satisfied `require_discovery_saturation`
+immediately, even though no real discovery had ever run -- combined with
+`min_entity_count: 1` already satisfied by one proof entity, a job could
+reach `phase1_complete` having done essentially nothing. Fixed: a run with
+`discovered_total == 0` now returns `not saturated` outright (real
+discovery has to have found *something* before "it tapered off" is even a
+meaningful claim). `require_discovery_saturation: false` still lets a job
+opt out entirely for cases where no discovery is intentionally configured
+-- this only changes behavior for jobs that explicitly require saturation
+but never got any. See `tests/test_discovery.py::
+test_zero_discovered_total_is_not_saturated` and the full-pipeline proof in
+`tests/test_phase1_completion_gating.py` (a single-seed/no-discovery job
+never reaches `PHASE1_COMPLETE`; a job with genuine list-page discovery
+does, once it actually tapers off).
+
+**`run_history.inserted_count` accuracy.** Re-audited end to end:
+`BaseCollector._handle_extracted()` increments `outcome.inserted` only on
+`Deduplicator.resolve()`'s `"new"` action, and `run_job_and_record()`
+passes `outcome.as_kwargs()` straight into `RunHistoryStore.finish()` --
+already correct, and already covered by the run-lifecycle tests. What was
+missing was a test proving the *count*, not just "at least one", stays
+exact at real scale and that a genuinely-unchanged re-fetch does not
+inflate it: `tests/test_run_lifecycle.py::
+test_run_history_inserted_count_matches_actual_new_entity_rows` (10
+distinct new products in one run -> `inserted_count == 10 ==
+len(entities)`) and `::test_refetching_unchanged_entity_does_not_increment_
+inserted_count`.
+
+**HTML entity decode.** Already fixed (see above) and already covers
+`&amp;`/`&#39;`; `&quot;` (and a combined multi-entity string) is now
+explicitly asserted too in `tests/test_html_entity_decode.py::
+test_decode_html_entities_basic`.
+
+**Config-seed guarantee, `jobs reseed`, worker-reload gate**: unchanged
+from the sections above -- batch #2 reuses them exactly as they are.
+
+## VPS: run Phase 1 batch #2
+
+```bash
+cd /root/tools/db_collector_os
+./scripts/run_goodsmile_phase1_batch2.sh
+```
+
+Batch #1's script (`scripts/run_goodsmile_phase1_batch1.sh`,
+`scripts/_phase1_batch1_watch_and_report.sh`,
+`scripts/_phase1_batch1_report.py`) is kept exactly as-is, as history --
+batch #2 is a **new, separate** set of scripts
+(`scripts/run_goodsmile_phase1_batch2.sh`,
+`scripts/_phase1_batch2_watch_and_report.sh`,
+`scripts/_phase1_batch2_report.py`) that reuses the identical safety
+design (SSH-disconnect-safe via `systemd-run`, the same preflight
+sequence -- git clean/fetch/ff-only, `jobs migrate`, DB backup/integrity,
+compileall, worker-reload gate + adapter smoke test, services active,
+Admin HTTP 200, resource gate, robots.txt re-check, sample-jobs-disabled
+check, `jobs sync` -> `jobs reseed` -> `jobs enable` -> `jobs resume`) under
+a distinct systemd unit name (`db-collector-phase1-batch2-goodsmile`, vs.
+batch #1's `...-batch1-...`), so re-running either script never
+double-launches or collides with the other's unit.
+
+What's different: the script also snapshots `ENTITY_COUNT_BEFORE` right
+before enabling the job, and the watcher's report
+(`scripts/_phase1_batch2_report.py`) adds `SEED_URL_COUNT`,
+`DISCOVERED_URL_COUNT` (total `entity_candidates`), the `QUEUE_TOTAL`/
+`QUEUE_PENDING`/`QUEUE_FETCHED`/`QUEUE_FAILED` `fetch_queue` breakdown,
+`ENTITY_COUNT_AFTER`/`ENTITY_DELTA`, `EVIDENCE_COUNT`, broad `HTTP_2XX`/
+`HTTP_3XX`/`HTTP_4XX`/`HTTP_5XX` buckets, `REVIEW_OPEN`, and a `CHECKPOINT`
+summary line, on top of everything batch #1's report already prints. The
+watcher then reports one of three explicit results instead of batch #1's
+plain PASS/FAIL:
+
+- **`PHASE1_RESULT=FAIL`** -- something is actually broken (DB integrity,
+  run status, run-lifecycle reuse, services, Admin HTTP, sample jobs
+  enabled, error rate, elevated HTTP error counts). Same structural checks
+  batch #1 already had.
+- **`PHASE1_RESULT=PARTIAL`** -- nothing is broken, but this batch didn't
+  prove real population growth: `ENTITY_DELTA <= 0`, or
+  `inserted_count == 0`, or `fetched_count <= 1`. Re-fetching the one
+  already-known proof entity and nothing else lands here, never as a
+  silent PASS.
+- **`PHASE1_RESULT=PASS`** -- no structural failure AND `ENTITY_DELTA > 0`
+  AND `inserted_count > 0` AND `fetched_count > 1` AND the error rate is
+  within `phase1_conditions.max_error_rate`. `READY_FOR_BATCH3=YES` only
+  on PASS.
+
+The job is disabled after the batch either way (PASS, PARTIAL, or FAIL),
+same "one batch at a time" policy as batch #1.
+
 ## VPS: run Phase 1 batch #1
 
 ```bash

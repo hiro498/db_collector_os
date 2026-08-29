@@ -17,6 +17,8 @@ def test_decode_html_entities_basic():
     assert decode_html_entities("Rikka &amp; Akane") == "Rikka & Akane"
     assert decode_html_entities("&lt;script&gt;") == "<script>"
     assert decode_html_entities("O&#39;Brien") == "O'Brien"
+    assert decode_html_entities("&quot;Quoted&quot;") == '"Quoted"'
+    assert decode_html_entities("A &amp; B &quot;C&quot; D&#39;s") == "A & B \"C\" D's"
 
 
 def test_decode_html_entities_is_idempotent_and_none_safe():

@@ -236,3 +236,72 @@ def test_run_history_counts_are_execution_local_not_cumulative(app_config, db):
     # And the first run's row is untouched.
     assert runs[0]["fetched_count"] == first_run["fetched_count"]
     assert runs[0]["inserted_count"] == first_run["inserted_count"]
+
+
+@responses_lib.activate
+def test_run_history_inserted_count_matches_actual_new_entity_rows(app_config, db):
+    """Ten distinct new products fetched in one run must produce exactly
+    ten new entity rows AND run_history.inserted_count == 10 -- the two
+    numbers (real DB writes vs. the counter) must never drift apart."""
+    n = 10
+    urls = [f"https://shop.example.com/product/{i}" for i in range(n)]
+    jr = JobRegistry(db)
+    job_id = make_job(jr, config={
+        "seed_urls": urls,
+        "discovery": {"internal_links": False, "related_entities": False},
+    }, max_pages=n)
+
+    responses_lib.add(responses_lib.GET, "https://shop.example.com/robots.txt", status=404)
+    for i, url in enumerate(urls):
+        responses_lib.add(
+            responses_lib.GET, url, status=200, content_type="text/html",
+            body=f'<html><head><title>P{i}</title><script type="application/ld+json">'
+                 f'{{"@type":"Product","name":"Widget {i}","sku":"SKU-{i}"}}'
+                 f'</script></head><body><h1>Widget {i}</h1></body></html>',
+        )
+
+    _run_once_via_worker(app_config, db, job_id, "w1")
+
+    run = db.query_one(
+        "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1", (job_id,)
+    )
+    entities = db.query("SELECT * FROM entities WHERE job_id=?", (job_id,))
+    assert len(entities) == n
+    assert run["fetched_count"] == n
+    assert run["inserted_count"] == n
+    assert run["inserted_count"] == len(entities)
+
+
+@responses_lib.activate
+def test_refetching_unchanged_entity_does_not_increment_inserted_count(app_config, db):
+    jr = JobRegistry(db)
+    job_id = make_job(jr, config={
+        "seed_urls": ["https://shop.example.com/product/1"],
+        "discovery": {"internal_links": False, "related_entities": False},
+        "incremental_revalidate_after_seconds": 0,
+    })
+
+    responses_lib.add(responses_lib.GET, "https://shop.example.com/robots.txt", status=404)
+    body = ('<html><head><title>P</title><script type="application/ld+json">'
+            '{"@type":"Product","name":"Widget","sku":"SKU-1"}</script></head>'
+            '<body><h1>Widget</h1></body></html>')
+    responses_lib.add(responses_lib.GET, "https://shop.example.com/product/1", status=200, content_type="text/html", body=body)
+
+    _run_once_via_worker(app_config, db, job_id, "w1")
+    entities_after_first = db.query("SELECT * FROM entities WHERE job_id=?", (job_id,))
+    assert len(entities_after_first) == 1
+
+    # Force the job into INCREMENTAL so the same URL is eligible to be
+    # re-fetched, then serve the exact same content again.
+    db.execute("UPDATE jobs SET phase=? WHERE job_id=?", ("incremental", job_id))
+    responses_lib.add(responses_lib.GET, "https://shop.example.com/product/1", status=200, content_type="text/html", body=body)
+
+    _run_once_via_worker(app_config, db, job_id, "w2")
+
+    entities_after_second = db.query("SELECT * FROM entities WHERE job_id=?", (job_id,))
+    assert len(entities_after_second) == 1  # no duplicate entity created
+
+    second_run = db.query_one(
+        "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1", (job_id,)
+    )
+    assert second_run["inserted_count"] == 0
