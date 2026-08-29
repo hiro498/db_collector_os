@@ -158,6 +158,8 @@ class Worker:
 
     def run_one_job(self) -> bool:
         """Claim and run a single job. Returns True if a job was processed."""
+        for due_job in self.jobs.due_jobs():
+            self.jobs.mark_queued(due_job["job_id"])
         job = self._claim_any_queued()
         if not job:
             return False

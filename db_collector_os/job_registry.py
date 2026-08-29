@@ -159,7 +159,7 @@ class JobRegistry:
         with self.db.transaction() as conn:
             cur = conn.execute(
                 "UPDATE jobs SET status='running', last_started_at=?, updated_at=? "
-                "WHERE job_id=? AND status='queued'",
+                "WHERE job_id=? AND status='queued' AND enabled=1",
                 (now_iso(), now_iso(), job_id),
             )
             return cur.rowcount > 0
