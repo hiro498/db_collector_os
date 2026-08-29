@@ -66,6 +66,24 @@ def test_expanding_seed_urls_after_single_product_proof_creates_new_run_and_fetc
         responses.GET, PRODUCT_URL, status=200, content_type="text/html",
         body=load_fixture("goodsmile_product_1141716.html"),
     )
+    # goodsmile_product_1141716.html itself links to a "related item"
+    # product page (/en/product/1141717/related-item), which also matches
+    # GOODSMILE_PATTERN. With the same-run page-discovery-promotion fix,
+    # that is discovered and fetched within step 1's own run (not deferred
+    # to a later run) -- mock it so the proof run's own internal-links
+    # discovery has somewhere real to land instead of hitting an
+    # accidental unmocked-URL connection error.
+    RELATED_URL = "https://www.goodsmile.com/en/product/1141717/related-item"
+    responses.add(
+        responses.GET, RELATED_URL, status=200, content_type="text/html",
+        body=(
+            '<html><head><meta charset="utf-8"><title>Related Item</title>'
+            '<script type="application/ld+json">{"@context": "https://schema.org", '
+            '"@type": "Product", "name": "Related Item Figure", "sku": "1141717", '
+            '"brand": {"@type": "Brand", "name": "Good Smile Company"}}</script>'
+            '</head><body><h1>Related Item Figure</h1></body></html>'
+        ),
+    )
 
     jr = JobRegistry(db)
     job_id = _make_job(jr, [PRODUCT_URL])
@@ -79,16 +97,20 @@ def test_expanding_seed_urls_after_single_product_proof_creates_new_run_and_fetc
         "SELECT * FROM run_history WHERE job_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1", (job_id,)
     )
     assert proof_run["status"] == RunStatus.COMPLETED
-    assert proof_run["fetched_count"] == 1
-    assert proof_run["inserted_count"] == 1
+    # Same-run page-discovery-promotion fix: the product page's own
+    # related-item link is discovered and fetched within this same run,
+    # rather than only becoming fetchable on some later run -- see
+    # collectors/pipeline.py BaseCollector._extract_records().
+    assert proof_run["fetched_count"] == 2
+    assert proof_run["inserted_count"] == 2
     proof_run_id = proof_run["run_id"]
 
     checkpoint = worker.ctx.checkpoints.load(job_id)
     assert checkpoint["state"].get("seeded") is True
 
     proof_entities = db.query("SELECT * FROM entities WHERE job_id=?", (job_id,))
-    assert len(proof_entities) == 1
-    proof_entity_id = proof_entities[0]["entity_id"]
+    assert len(proof_entities) == 2
+    proof_entity_id = next(e["entity_id"] for e in proof_entities if e["external_id"] == "1141716")
 
     # -- step 2: Phase 1 config expansion -- add the Scale Figure list as a --
     # -- second seed, on top of the already-fetched product URL. -------------

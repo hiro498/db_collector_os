@@ -10,12 +10,13 @@ import json
 from typing import Any
 
 from ..adapters.base import Adapter, ExtractedRecord
-from .pipeline import BaseCollector
+from .pipeline import BaseCollector, RunOutcome
 
 
 class ApiCollector(BaseCollector):
     def _extract_records(
-        self, job: dict[str, Any], adapter: Adapter, url: str, content: str, content_type: str | None
+        self, job: dict[str, Any], adapter: Adapter, url: str, content: str, content_type: str | None,
+        outcome: RunOutcome,
     ) -> list[ExtractedRecord]:
         try:
             payload = json.loads(content) if content else {}

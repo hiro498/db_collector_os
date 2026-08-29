@@ -47,6 +47,10 @@ class DiscoveryEngine:
         self.search_provider = search_provider
 
     def run_seed_discovery(self, job: dict[str, Any]) -> list[DiscoveredURL]:
+        """Returns only the DiscoveredURLs that became genuinely new
+        `entity_candidates` rows this call (see `_save_candidates`) -- not
+        every URL observed, which routinely includes items already known
+        from a prior run/page."""
         cfg = job.get("config_json", {}) or {}
         discovery_cfg = cfg.get("discovery", {}) or {}
         found: list[DiscoveredURL] = []
@@ -80,6 +84,10 @@ class DiscoveryEngine:
         return self._save_candidates(job, found)
 
     def discover_from_page(self, job: dict[str, Any], extracted: dict[str, Any], page_domain: str) -> list[DiscoveredURL]:
+        """Same "genuinely new only" return semantics as `run_seed_discovery`
+        (see `_save_candidates`) -- callers rely on `len(...)` of this to
+        mean actual new candidates attributable to processing this one page,
+        not every link observed on it."""
         cfg = job.get("config_json", {}) or {}
         discovery_cfg = cfg.get("discovery", {}) or {}
         found: list[DiscoveredURL] = []
@@ -104,7 +112,22 @@ class DiscoveryEngine:
             return []
 
     def _save_candidates(self, job: dict[str, Any], found: list[DiscoveredURL]) -> list[DiscoveredURL]:
+        """Persist every item in `found` (via the idempotent, fingerprint-
+        deduped `CandidateStore.add()`) and return only the subset that was
+        genuinely a NEW candidate row this call -- not `found` itself.
+
+        `found` is whatever a discovery method observed on this pass, which
+        routinely re-observes URLs already known from a previous page/run
+        (e.g. a repeated nav link). Returning `found` verbatim would make
+        every caller's `len(...)` count re-observed duplicates as if they
+        were newly discovered, which is exactly the
+        run_history.discovered_count / discovery_runs.new_candidates
+        semantics this must not produce (see RunOutcome.discovered in
+        collectors/pipeline.py). `CandidateStore.add()` already reports
+        `(candidate_id, created)`; this just stops discarding that.
+        """
         entity_type = job.get("category") or job.get("collector_type", "entity")
+        newly_created: list[DiscoveredURL] = []
         for item in found:
             url = normalize_url(item.url)
             if not url:
@@ -115,7 +138,7 @@ class DiscoveryEngine:
             # slug, tracking params, ...) collapse into one candidate before
             # either is ever fetched -- see discovery/internal_links.py.
             fingerprint = f"{entity_type}:{item.stable_id}" if item.stable_id else url
-            self.candidates.add(
+            _candidate_id, created = self.candidates.add(
                 job_id=job["job_id"],
                 entity_type=entity_type,
                 name=None,
@@ -126,4 +149,6 @@ class DiscoveryEngine:
                 fingerprint=fingerprint,
                 confidence=item.confidence,
             )
-        return found
+            if created:
+                newly_created.append(item)
+        return newly_created

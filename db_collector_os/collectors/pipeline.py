@@ -255,7 +255,7 @@ class BaseCollector:
             ctx.fetch_queue.mark_done(queue_id, 304, content_hash=item.get("content_hash"), etag=item.get("etag"), last_modified=item.get("last_modified"))
             return
 
-        records = self._extract_records(job, adapter, item["url"], result.content or "", result.content_type)
+        records = self._extract_records(job, adapter, item["url"], result.content or "", result.content_type, outcome)
         ctx.fetch_queue.mark_done(queue_id, result.http_status or 200, result.content_hash, result.etag, result.last_modified)
 
         candidate = ctx.candidates.get_by_url(job_id, item["url"])
@@ -263,13 +263,34 @@ class BaseCollector:
             self._handle_extracted(job, record, item["url"], domain, candidate, outcome)
 
     def _extract_records(
-        self, job: dict[str, Any], adapter: Adapter, url: str, content: str, content_type: str | None
+        self, job: dict[str, Any], adapter: Adapter, url: str, content: str, content_type: str | None,
+        outcome: RunOutcome,
     ) -> list[ExtractedRecord]:
         """Default (HTML collectors): one page -> one record. Overridden by
         ApiCollector, where one JSON response can list many entities.
+
+        A page processed here during `_drain_fetch_queue()` (e.g. the
+        scalefigure_list listing page) may itself discover new product-page
+        candidates via `discover_from_page()`. Those must (a) correctly
+        count toward `outcome.discovered` -- `discover_from_page()` already
+        returns only genuinely-new candidates, see DiscoveryEngine.
+        _save_candidates -- and (b) become fetchable within this SAME
+        bounded run rather than waiting for a follow-up run_once() call, so
+        promote them into fetch_queue immediately via the same idempotent
+        `_promote_new_candidates()` the top of run_once() already uses (its
+        `CandidateStore.list_new()` + `FetchQueue.enqueue()` are both safe
+        to call repeatedly within one run -- enqueue() no-ops for a URL
+        already tracked, and a candidate stays selectable by list_new()
+        only until it is actually fetched and its status changes off
+        'new'). `_drain_fetch_queue()`'s own `outcome.fetched < max_pages`
+        loop condition is untouched, so this can add queue depth but can
+        never cause more than max_pages fetches in this run.
         """
         common = extract_common(content, url)
-        self.ctx.discovery.discover_from_page(job, common, extract_domain(url))
+        newly_discovered = self.ctx.discovery.discover_from_page(job, common, extract_domain(url))
+        if newly_discovered:
+            outcome.discovered += len(newly_discovered)
+            self._promote_new_candidates(job, outcome)
         return [adapter.extract(common, url, content)]
 
     def _handle_extracted(
