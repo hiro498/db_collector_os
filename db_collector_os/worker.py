@@ -68,18 +68,38 @@ def run_job_and_record(
 
     job_after = jobs.get(job_id)
     checkpoint = ctx.checkpoints.load(job_id)
-    run_id = checkpoint["state"].get("current_run_id")
-    still_working = job_after["phase"] != JobPhase.INCREMENTAL and not ctx.fetch_queue.is_empty(job_id)
+    state = checkpoint["state"]
+    run_id = state.get("current_run_id")
+
+    # "More work to do" has two distinct, both entirely healthy, shapes:
+    #  1. fetch_queue still has pending items for this job.
+    #  2. Phase 1 hasn't been given a fair chance to judge discovery
+    #     saturation yet (see discovery/saturation.py + phase_manager.py):
+    #     the queue can look empty between discovery cycles while more
+    #     low-yield discovery runs are still needed to confirm saturation
+    #     -- without this, such a job would only get re-evaluated on its
+    #     full `schedule` cadence (e.g. once a day), taking days to
+    #     accumulate the few consecutive confirmations Phase 1 needs.
+    # Neither of these is a failure -- see JobStatus.CONTINUING.
+    phase1_conditions = (job_after.get("config_json", {}) or {}).get("phase1_conditions", {}) or {}
+    required_streak = phase1_conditions.get("consecutive_low_discovery_runs", 0)
+    low_streak = state.get("low_discovery_streak", 0)
+    needs_more_discovery_runs = (
+        job_after["phase"] in (JobPhase.DISCOVERY, JobPhase.COLLECT, JobPhase.VALIDATION)
+        and bool(required_streak)
+        and low_streak < required_streak
+    )
+    queue_has_work = job_after["phase"] != JobPhase.INCREMENTAL and not ctx.fetch_queue.is_empty(job_id)
+    still_working = queue_has_work or needs_more_discovery_runs
 
     if run_id:
         ctx.run_history.finish(run_id, RunStatus.COMPLETED, **outcome.as_kwargs())
-    state = checkpoint["state"]
     state.pop("current_run_id", None)
     ctx.checkpoints.save(job_id, None, job_after["phase"], state)
 
     if still_working:
-        jobs.finish(job_id, JobStatus.RETRY, next_run_override=now_plus(poll_interval_seconds))
-        status = JobStatus.RETRY
+        jobs.finish(job_id, JobStatus.CONTINUING, next_run_override=now_plus(poll_interval_seconds))
+        status = JobStatus.CONTINUING
     else:
         jobs.finish(job_id, JobStatus.COMPLETED)
         status = JobStatus.COMPLETED

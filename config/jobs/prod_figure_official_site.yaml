@@ -68,6 +68,21 @@ config:
     # above (/en/product/<id>/<slug>) and the confirmed real listing URL --
     # not a guess. See discovery/internal_links.py.
     product_url_pattern: "/en/product/(\\d+)/|/en/scalefigure_list"
+  # Batch #2 production result: with only this single domain in play and
+  # rate_limit=5.0, _drain_fetch_queue() fetched exactly ONE page per
+  # run_once() call (the domain becomes not-ready the instant the first
+  # request is recorded, so every subsequent claim attempt in the same call
+  # found nothing ready and gave up) -- 73 separate runs instead of one
+  # ~3-run batch for 73 pages at max_pages=30. Opting in here lets one
+  # run_once() call wait out the (short) per-request gap and keep draining
+  # toward max_pages instead of deferring to a brand-new run every time.
+  # 180s covers max_pages=30 fetched fully serially at rate_limit=5.0
+  # (~150s) plus slack; still bounded, still concurrency=1, still exactly
+  # rate_limit=5.0 between requests -- this does not loosen any rate
+  # limiting, it only lets one logical run wait through it instead of
+  # bailing out after a single page. See collectors/pipeline.py
+  # BaseCollector._drain_fetch_queue().
+  max_drain_wait_seconds: 180
   phase1_conditions:
     queue_empty: true
     require_discovery_saturation: true

@@ -165,6 +165,15 @@ def test_run_lifecycle_fix_still_holds_alongside_seed_guarantee(app_config, db):
     responses.add(responses.GET, PRODUCT_URL, status=200, content_type="text/html",
                   body='<html><head><title>P</title><script type="application/ld+json">'
                        '{"@type":"Product","name":"Widget"}</script></head><body><h1>Widget</h1></body></html>')
+    # The real production YAML's OTHER seed (the Scale Figure list) also
+    # gets enqueued by ensure_seed_urls_queued() every run -- mock it too
+    # (a bare list page with no product links) so this run resolves
+    # immediately instead of hitting the fetch-failure/backoff path for an
+    # unmocked URL, which would otherwise trigger the (opt-in, real)
+    # drain-wait sleep this same production YAML now sets via
+    # max_drain_wait_seconds -- unrelated to what this test is checking.
+    responses.add(responses.GET, LIST_URL, status=200, content_type="text/html",
+                  body='<html><head><title>List</title></head><body></body></html>')
 
     registry = JobRegistry(db)
     job_id = _sync_job_from_real_yaml(registry, GOODSMILE_YAML)

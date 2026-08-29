@@ -170,7 +170,7 @@ def test_cli_jobs_run_each_invocation_gets_unique_run_id(tmp_path, monkeypatch):
         result = runner.invoke(main, ["--config", str(config_path), "jobs", "run", job_id])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload["status"] in ("completed", "retry")
+        assert payload["status"] in ("completed", "continuing")
 
         db = Database(cfg.db_path)
         latest = db.query_one(

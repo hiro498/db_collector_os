@@ -10,6 +10,7 @@ calls -- this is what makes long jobs checkpoint-able and interruptible.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from ..adapters import Adapter, get_adapter
@@ -190,28 +191,54 @@ class BaseCollector:
         job_id = job["job_id"]
         max_pages = job.get("max_pages", 200)
         rate_limit = job.get("rate_limit", 1.0)
+        # Opt-in only (default 0): how long this ONE run_once() call may
+        # spend sleeping through per-domain rate-limit waits so it can keep
+        # draining the queue toward max_pages, instead of giving up the
+        # instant the (usually single) domain involved isn't immediately
+        # ready. Without this, a job whose queue holds many same-domain
+        # URLs -- exactly the Good Smile Phase 1 case -- fetches exactly
+        # one page per run_once() call every time rate_limit > 0, turning
+        # "one batch, up to max_pages" into "max_pages separate runs".
+        # Defaults to 0 (today's behavior: give up immediately, defer the
+        # rest to a later run) so every job that doesn't opt in -- and
+        # every existing test -- is completely unaffected.
+        max_drain_wait = (job.get("config_json", {}) or {}).get("max_drain_wait_seconds", 0) or 0
 
         attempts = 0
         max_attempts = max_pages * 3  # allow some retries-in-loop without an infinite loop
+        waited_total = 0.0
         while outcome.fetched < max_pages and attempts < max_attempts:
             attempts += 1
-            ready_domains = self._ready_domains(job_id, rate_limit)
-            item = self.ctx.fetch_queue.claim_next(job_id, ready_domains=ready_domains)
-            if not item:
-                break
-            self._process_queue_item(job, adapter, item, outcome)
+            ready_domains, min_wait = self._ready_domains(job_id, rate_limit)
+            item = self.ctx.fetch_queue.claim_next(job_id, ready_domains=ready_domains) if ready_domains else None
+            if item:
+                self._process_queue_item(job, adapter, item, outcome)
+                continue
+            if min_wait is None:
+                break  # nothing queued at all -- genuinely empty, not rate-limited
+            if max_drain_wait > 0 and waited_total + min_wait <= max_drain_wait:
+                time.sleep(min_wait)
+                waited_total += min_wait
+                continue
+            break  # would exceed this run's drain-wait budget -- defer the rest to a later run
 
-    def _ready_domains(self, job_id: str, rate_limit: float) -> set[str]:
+    def _ready_domains(self, job_id: str, rate_limit: float) -> tuple[set[str], float | None]:
+        """Returns (domains ready to fetch now, seconds until the soonest
+        currently-queued domain becomes ready -- None if nothing is queued
+        at all)."""
         rows = self.ctx.db.query(
             "SELECT DISTINCT domain FROM fetch_queue WHERE job_id=? AND status='queued'", (job_id,)
         )
         ready = set()
+        min_wait: float | None = None
         for row in rows:
             domain = row["domain"]
-            allowed, _wait = self.ctx.rate_limiter.is_allowed(domain, delay_seconds=rate_limit)
+            allowed, wait = self.ctx.rate_limiter.is_allowed(domain, delay_seconds=rate_limit)
             if allowed:
                 ready.add(domain)
-        return ready
+            elif min_wait is None or wait < min_wait:
+                min_wait = wait
+        return ready, min_wait
 
     def _process_queue_item(self, job: dict[str, Any], adapter: Adapter, item: dict[str, Any], outcome: RunOutcome) -> None:
         ctx = self.ctx

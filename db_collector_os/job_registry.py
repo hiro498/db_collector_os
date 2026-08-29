@@ -128,7 +128,7 @@ class JobRegistry:
         now = now or now_iso()
         rows = self.db.query(
             """SELECT * FROM jobs WHERE enabled = 1
-                 AND status IN ('idle', 'completed', 'retry')
+                 AND status IN ('idle', 'completed', 'continuing', 'retry')
                  AND (next_run_at IS NULL OR next_run_at <= ?)
                ORDER BY priority DESC, next_run_at""",
             (now,),
@@ -149,7 +149,8 @@ class JobRegistry:
 
     def mark_queued(self, job_id: str) -> None:
         self.db.execute(
-            "UPDATE jobs SET status = 'queued', updated_at = ? WHERE job_id = ? AND status IN ('idle','completed','retry')",
+            "UPDATE jobs SET status = 'queued', updated_at = ? "
+            "WHERE job_id = ? AND status IN ('idle','completed','continuing','retry')",
             (now_iso(), job_id),
         )
 

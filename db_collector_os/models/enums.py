@@ -13,11 +13,22 @@ class JobStatus:
     RUNNING = "running"
     COMPLETED = "completed"
     REVIEW = "review"
+    # CONTINUING: this run finished cleanly (no error) but the job isn't
+    # done yet -- fetch_queue still has pending items, or Phase 1 hasn't
+    # met its completion conditions. Distinct from RETRY on purpose: RETRY
+    # means "this run failed/was interrupted and should be attempted
+    # again" (see JobRegistry.reset_stale_running(), used when a worker
+    # dies mid-job). Reusing RETRY for ordinary continuation made every
+    # successful multi-page batch look like a chain of failures being
+    # retried, when nothing had actually failed. Both statuses are
+    # schedulable the same way (due_jobs()/mark_queued() treat them
+    # identically) -- only their meaning to a human/operator differs.
+    CONTINUING = "continuing"
     RETRY = "retry"
     FAILED = "failed"
     PAUSED = "paused"
 
-    ALL = (IDLE, QUEUED, RUNNING, COMPLETED, REVIEW, RETRY, FAILED, PAUSED)
+    ALL = (IDLE, QUEUED, RUNNING, COMPLETED, REVIEW, CONTINUING, RETRY, FAILED, PAUSED)
 
 
 class JobPhase:

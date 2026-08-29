@@ -446,6 +446,117 @@ plain PASS/FAIL:
 The job is disabled after the batch either way (PASS, PARTIAL, or FAIL),
 same "one batch at a time" policy as batch #1.
 
+## Phase 1 batch #3: run lifecycle correctness (the real VPS Batch #2 result)
+
+Batch #2's actual production run was a genuine success by every DB-writer
+measure -- `ENTITY_COUNT_BEFORE=1` -> `ENTITY_COUNT_AFTER=72`
+(`ENTITY_DELTA=71`), 73 runs all `status=completed`/`error_count=0`, DB
+integrity `ok`. But the job ended in the contradiction `enabled=false` +
+`status=retry`, and it got there by creating 73 separate `run_history`
+rows roughly 15 seconds apart -- "list -> discover -> fetch multiple
+pages -> insert multiple entities" had become "one URL, one run,
+73 times." Two root causes, both traced to specific code (not guessed):
+
+**1. `JobStatus.RETRY` was overloaded for two unrelated meanings.**
+`worker.py::run_job_and_record()` set `job.status = RETRY` whenever
+`fetch_queue` still had pending work after a run -- the exact same status
+`JobRegistry.reset_stale_running()` uses when a worker crashes mid-job and
+the run needs a genuine retry. A successful run with more queued work left
+is not a failure; nothing needed retrying. Fixed: a new
+`JobStatus.CONTINUING` ("healthy, more work queued or Phase 1 not yet
+saturated") is now used for that case; `RETRY` is reserved exclusively for
+`reset_stale_running()`'s crash-recovery path. Both are schedulable the
+same way (`JobRegistry.due_jobs()`/`mark_queued()` treat them identically)
+-- only their meaning to a human differs. `run_job_and_record()` also now
+recognizes a second, subtler "still working" case: Phase 1 hasn't been
+given a fair chance to confirm discovery saturation yet (see
+`discovery/saturation.py`'s `consecutive_low_discovery_runs` window) --
+without this, a job whose queue looks empty between discovery cycles would
+only get re-evaluated on its full `schedule` cadence (e.g. once a day),
+taking days to accumulate the handful of confirmations Phase 1 needs;
+`CONTINUING` schedules it again within `poll_interval_seconds` instead.
+
+**2. `_drain_fetch_queue()` fetched exactly one page per `run_once()` call
+whenever `rate_limit > 0` and only one domain was involved** -- exactly
+the Good Smile job's shape. The loop recomputed "which domains are ready"
+every iteration but never waited for a domain to become ready again within
+the same call: the instant the first request was recorded, the (single)
+domain stopped being ready, `claim_next()` found nothing, and the loop
+broke immediately -- regardless of `max_pages`. Fixed, opt-in only
+(`config.max_drain_wait_seconds`, default `0` = today's exact behavior,
+so every job that doesn't set it, and every existing test, is completely
+unaffected): when nothing is ready but the queue isn't empty,
+`_drain_fetch_queue()` now sleeps the *shortest* wait among queued
+domains (never longer, and never past the configured budget) and retries,
+so one `run_once()` call can actually reach `max_pages` under a real
+per-domain rate limit instead of deferring to a brand-new run every time.
+`config/jobs/prod_figure_official_site.yaml` sets
+`max_drain_wait_seconds: 180` -- enough to serially drain `max_pages: 30`
+at `rate_limit: 5.0` (~150s) plus slack. This does not loosen rate
+limiting in any way: still exactly `rate_limit` seconds between requests,
+still `concurrency: 1` -- it only lets one logical run wait through the
+gap instead of giving up after a single page.
+
+Both fixes are covered end to end: `tests/test_run_lifecycle_continuing_
+status.py` (successful-run-with-queue-remaining -> CONTINUING never RETRY;
+Phase-1-not-saturated -> CONTINUING scheduled soon, not the full `@daily`
+cadence; a genuine crash recovery still uses RETRY; a disabled job is
+never left showing RETRY) and `tests/test_drain_wait_multi_page_batch.py`
+(one run drains multiple same-domain pages up to `max_pages`; the cap is
+still honored; the default-off behavior is provably unchanged).
+
+## VPS: run Phase 1 batch #3
+
+```bash
+cd /root/tools/db_collector_os
+./scripts/run_goodsmile_phase1_batch3.sh
+```
+
+Batch #1 and batch #2's scripts are kept exactly as-is, as history --
+batch #3 is a new, separate set of scripts
+(`scripts/run_goodsmile_phase1_batch3.sh`,
+`scripts/_phase1_batch3_watch_and_report.sh`,
+`scripts/_phase1_batch3_report.py`) reusing the identical safety design
+under yet another distinct systemd unit name
+(`db-collector-phase1-batch3-goodsmile`). It continues using the
+**existing** production DB and its 72 entities -- nothing is reset,
+re-seeded from scratch, or deleted.
+
+New in batch #3's report/gate, on top of everything batch #2 already
+prints: `RUN_COUNT` (how many `run_history` rows *this batch* created --
+isolated via a `RUN_COUNT_BEFORE` snapshot taken right before the batch
+starts, since `run_history` is immutable and append-only) and
+`LIFECYCLE_OK` (`YES` only if every one of this batch's own runs actually
+finalized as `completed`, and the job's status was never left as the
+misleading `retry` value for a batch that had `error_total == 0`).
+`FETCHED_COUNT`/`INSERTED_COUNT`/`UPDATED_COUNT`/`ERROR_COUNT` in batch
+#3's report are this batch's own aggregate across however many
+`run_history` rows it actually needed (still individually immutable,
+never mixed with any other batch's rows) -- not just the single latest
+row, since the architecture can still create more than one run per batch
+when discovery genuinely needs multiple cycles.
+
+`PHASE1_RESULT` gating changed from batch #2's: `ENTITY_DELTA > 0` is
+**not** required for PASS/FAIL anymore -- re-fetching the existing 72
+entities with nothing new to discover is a legitimate, healthy outcome
+once the queue and discovery are both genuinely exhausted, and is no
+longer penalized. Instead, `FAIL` now additionally triggers on
+`lifecycle_not_ok` (any of this batch's own runs didn't finalize as
+completed, or the job momentarily showed `status=retry` for what was
+actually success) and `runaway_one_page_per_run` (when there was
+substantial pending work before the batch started -- `QUEUE_PENDING_BEFORE
+> 1` -- and more than 5 pages were fetched, but the average fetched-per-
+run stayed below 2, meaning the batch fragmented the way batch #2's did).
+A batch with no structural or lifecycle problems but zero population
+growth is `PARTIAL` (informational only), never silently `PASS`.
+
+After the batch settles, the watcher runs `jobs disable` **and then
+`jobs pause`** (batch #1/#2 only disabled) -- pausing in addition to
+disabling guarantees the job's final displayed status is always one of
+`completed`/`paused`, never `continuing`/`retry`, which could otherwise
+read as unfinished or failed work still pending when the batch has in
+fact ended and the job was deliberately stopped.
+
 ## VPS: run Phase 1 batch #1
 
 ```bash

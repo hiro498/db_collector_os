@@ -37,7 +37,10 @@ def test_run_one_job_processes_queued_job(app_config, db):
     assert did_work is True
 
     job = jr.get(job_id)
-    assert job["status"] in (JobStatus.COMPLETED, JobStatus.RETRY)
+    # COMPLETED (queue drained, Phase 1 conditions satisfied) or CONTINUING
+    # (healthy, more work queued/discovery-saturation not yet confirmed) --
+    # never RETRY, which means an actual failure (see JobStatus.CONTINUING).
+    assert job["status"] in (JobStatus.COMPLETED, JobStatus.CONTINUING)
 
     run_rows = db.query("SELECT * FROM run_history WHERE job_id=?", (job_id,))
     assert len(run_rows) == 1

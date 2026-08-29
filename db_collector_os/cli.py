@@ -278,8 +278,9 @@ def jobs_resume(ctx: click.Context, job_id: str) -> None:
 @click.argument("job_id")
 @click.pass_context
 def jobs_enable(ctx: click.Context, job_id: str) -> None:
-    """Flip a job's `enabled` flag on (it still needs status idle/completed/retry
-    -- see `jobs resume` -- to actually become due)."""
+    """Flip a job's `enabled` flag on (it still needs status
+    idle/completed/continuing/retry -- see `jobs resume` -- to actually
+    become due)."""
     registry = JobRegistry(_db(ctx))
     if not registry.get(job_id):
         click.echo(f"no such job: {job_id}", err=True)

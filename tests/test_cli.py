@@ -133,7 +133,7 @@ def test_jobs_run_finishes_run_history_on_success(tmp_path, monkeypatch):
     result = runner.invoke(main, ["--config", str(config_path), "jobs", "run", job_id])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["status"] in ("completed", "retry")
+    assert payload["status"] in ("completed", "continuing")
     assert payload["fetched_count"] == 1
     assert payload["inserted_count"] == 1
     assert payload["error_count"] == 0
