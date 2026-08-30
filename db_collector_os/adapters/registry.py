@@ -23,6 +23,7 @@ def _import_builtin_adapters() -> None:
     # module is idempotent, so calling this repeatedly is cheap and safe.
     from . import (  # noqa: F401
         figure_official_site,
+        lovehotel_couples,
         sample_api,
         sample_local_business,
         sample_official_site,

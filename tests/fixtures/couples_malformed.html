@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Broken Page</title>
+    <script type="application/ld+json">
+    { "@type": "LodgingBusiness", "name": "Broken JSON
+    </script>
+    <!-- Malformed JSON-LD (unterminated string) must be skipped by
+         extract_json_ld() rather than crash extraction. This page also has
+         no postal-code-shaped address and no facility ID in its URL, so it
+         must classify as skip=True, not review or a crash. -->
+    <link rel="canonical" href="https://couples.jp/error-page">
+</head>
+<body>
+    <h1>ページが見つかりません</h1>
+    <p>お探しのページは見つかりませんでした。</p>
+</body>
+</html>

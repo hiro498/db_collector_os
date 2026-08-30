@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>東京都のラブホテル一覧 - Couples</title>
+    <link rel="canonical" href="https://couples.jp/tokyo/">
+    <!--
+      Realistic reconstruction of a Couples prefecture/area listing page,
+      NOT a live scrape (see couples_facility_detail_full.html header for
+      why). No JSON-LD business block, no postal-code-shaped address, and
+      its own canonical URL ("/tokyo/") has no numeric facility ID -- this
+      adapter must classify it as skip=True while its embedded facility
+      links still get followed by internal-link discovery.
+    -->
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="https://couples.jp/">Couples トップ</a>
+            <a href="https://couples.jp/hokkaido/">北海道</a>
+            <a href="https://couples.jp/osaka/">大阪府</a>
+        </nav>
+    </header>
+
+    <h1>東京都のラブホテル一覧</h1>
+
+    <ul class="hotel-list">
+        <li><a href="https://couples.jp/hotel/12345/">ホテル アルファ</a></li>
+        <li>
+            <!-- same facility, alternate query string -- must collapse to
+                 the same facility ID as the link above once fetched -->
+            <a href="https://couples.jp/hotel/12345/?utm_source=list">ホテル アルファ（一覧経由）</a>
+        </li>
+        <li><a href="https://couples.jp/hotel/23456/">ホテル ベータ</a></li>
+        <li><a href="https://couples.jp/hotel/34567/">ホテル ガンマ</a></li>
+        <li><a href="https://couples.jp/hotel/45678/">ホテル デルタ</a></li>
+    </ul>
+
+    <nav class="pagination">
+        <a href="https://couples.jp/tokyo/?page=2">次のページ</a>
+    </nav>
+
+    <footer>
+        <a href="https://couples.jp/privacy">プライバシーポリシー</a>
+        <a href="https://couples.jp/terms">利用規約</a>
+        <a href="https://not-couples.example.com/hotel/99999/off-domain">Off-domain link (must be excluded)</a>
+    </footer>
+</body>
+</html>

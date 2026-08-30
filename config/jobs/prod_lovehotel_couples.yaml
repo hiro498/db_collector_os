@@ -1,0 +1,118 @@
+# PRODUCTION job #2: 全国ラブホテル施設DB (nationwide love hotel facility DB)
+# Source: カップルズ (couples.jp).
+#
+# Phase 1 goal: nationwide facility POPULATION FORMATION (name / prefecture
+# / city / address / detail URL / official URL / operating status / source
+# facility ID) -- deep attributes (price, rooms, plans, reviews) are
+# explicitly out of scope for this job. See docs/lovehotel_couples_db.md
+# for the full design rationale, including why this job's discovery is
+# NOT scoped to a guessed facility-URL regex (this authoring environment
+# has no outbound web access to couples.jp -- confirmed blocked -- so no
+# URL pattern or pagination scheme below is guessed as verified fact; only
+# the top-level domain itself is treated as confirmed real).
+#
+# robots.txt / actual page structure: NOT verifiable from this environment
+# (see docs/lovehotel_couples_db.md). FetchEngine already respects
+# robots.txt for every request regardless (fetching/client.py); this job
+# adds no override. The VPS operator (real HTTP access) should re-confirm
+# robots.txt and general site behavior as part of the same preflight
+# pattern used for job_prod_figure_official_site before ever enabling this
+# job, exactly as docs/first_production_db.md's batch scripts already do
+# for the first production DB.
+#
+# Happy Hotel / NAVITIME are explicitly NOT sources for this job (per this
+# DB's brief) -- no seed/discovery config here references either.
+job_id: "job_prod_lovehotel_couples"
+job_name: "Love Hotel Nationwide - Couples"
+category: "love_hotel"
+target_db: "lovehotel_facilities"
+target_table: "entities"
+collector_type: "local_business"
+adapter: "lovehotel_couples"
+priority: 50
+# Keep disabled in Git. Enabling happens only on the VPS (db-collector jobs
+# enable/resume) after the same kind of preflight the Good Smile batch
+# scripts run (git ff-only, DB backup/integrity, compileall, worker-reload
+# + adapter import smoke test, services active, resource gate, a LIVE
+# robots.txt re-check against couples.jp, sample/other-prod jobs
+# unaffected) -- this file stays enabled: false regardless.
+enabled: false
+# Steady-state (post Phase-1 / incremental) cadence only. During active
+# Phase 1 crawling this job reschedules itself every
+# worker_poll_interval_seconds via JobStatus.CONTINUING whenever
+# fetch_queue still has pending work (see worker.py::run_job_and_record) --
+# @daily is not "one full crawl per day", it is the fallback interval once
+# the queue is genuinely empty and Phase 1 has nothing left to do this
+# cycle. This is the same reasoning already documented for
+# job_prod_figure_official_site (see docs/first_production_db.md's "STEP 8"
+# note on avoiding a "無意味な毎時フルクロール").
+schedule: "@daily"
+# Conservative first-batch numbers, matching the first production DB's own
+# starting point exactly (docs/first_production_db.md): this environment
+# cannot verify couples.jp's real server behavior/capacity, so these are
+# safe defaults, not a guess at what the site can tolerate. The VPS
+# operator can tune upward in a later batch once real behavior is observed
+# (mirroring how job_prod_figure_official_site evolved across batches 1-3).
+max_pages: 30
+max_depth: 3
+concurrency: 1
+rate_limit: 5.0
+config:
+  seed_urls:
+    # The one URL this whole job treats as confirmed real: the domain given
+    # directly in this DB's brief. Every other page this job ever fetches is
+    # reached only via links actually found on pages it has itself already
+    # fetched (internal_links discovery below) -- nothing else is seeded.
+    - "https://couples.jp/"
+  discovery:
+    sitemap_urls: []
+    # robots.txt-declared sitemaps (if any) are picked up generically,
+    # without guessing a sitemap path -- see discovery/robots_sitemap.py.
+    robots_seed_urls:
+      - "https://couples.jp/"
+    internal_links: true
+    # Deliberately OFF: discover_related_entities() follows a page's own
+    # JSON-LD `sameAs` links with NO domain restriction at all (see
+    # discovery/related_entity.py) -- if a facility's official_url ever
+    # appeared there, this would grow the crawl into
+    # "Couples -> official site -> whatever THAT page links to -> ...",
+    # exactly what this DB's brief says must never happen. official_url is
+    # still captured (with evidence) by the adapter into
+    # entities.data_json.official_url -- it is simply never auto-enqueued
+    # into this job's own fetch_queue. See docs/lovehotel_couples_db.md
+    # "STEP 10" for the full reasoning.
+    related_entities: false
+    allowed_domains:
+      - "couples.jp"
+      - "www.couples.jp"
+    # No `product_url_pattern` here on purpose (unlike
+    # job_prod_figure_official_site's `/en/product/(\d+)/|.../scalefigure_list`
+    # pattern, which was derived from a CONFIRMED real product URL given
+    # directly by the operator). This environment has no confirmed Couples
+    # facility-URL or area-listing-URL shape to derive a pattern from --
+    # scoping internal_links to a guessed pattern risks silently excluding
+    # the very prefecture/area listing pages a nationwide crawl needs to
+    # traverse to ever reach facility pages at all (see
+    # docs/lovehotel_couples_db.md). Classification of "is this a facility
+    # page" is left entirely to lovehotel_couples.py's own content-based
+    # skip logic (JSON-LD LodgingBusiness/Hotel/LocalBusiness, a
+    # postal-code-shaped address, or a facility ID in the URL) -- not to
+    # URL-shape filtering. A follow-up batch can add a confirmed
+    # `product_url_pattern` here once real HTTP access verifies the actual
+    # scheme, exactly as the Good Smile job evolved across its own batches.
+  # See job_prod_figure_official_site.yaml for the full reasoning: lets one
+  # run_once() call wait out this single domain's rate-limit gaps and keep
+  # draining toward max_pages, instead of deferring to a brand-new run
+  # after every single page. Still exactly rate_limit=5.0s between
+  # requests, still concurrency=1 -- this does not loosen rate limiting.
+  max_drain_wait_seconds: 180
+  phase1_conditions:
+    queue_empty: true
+    require_discovery_saturation: true
+    consecutive_low_discovery_runs: 3
+    max_error_rate: 0.5
+    min_entity_count: 1
+  # Facility listings change rarely (name/address/official-URL churn is
+  # low for this kind of directory) -- 30 days is a conservative, not
+  # aggressive, revalidation interval for the incremental phase.
+  incremental_revalidate_after_seconds: 2592000

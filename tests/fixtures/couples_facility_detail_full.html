@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>ホテル アルファ｜東京都のラブホテル - Couples</title>
+    <link rel="canonical" href="https://couples.jp/hotel/12345/">
+    <!--
+      Realistic reconstruction of a Couples (couples.jp) facility detail
+      page, NOT a live scrape: this environment has no outbound web access
+      to couples.jp (confirmed blocked -- see docs/lovehotel_couples_db.md).
+      Includes a schema.org LodgingBusiness JSON-LD block (the strongest
+      structural signal this adapter recognizes), in addition to the
+      plain-text postal address fallback this adapter can also parse when a
+      real page lacks structured data (see couples_facility_detail_no_jsonld.html).
+    -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "LodgingBusiness",
+        "name": "ホテル アルファ",
+        "telephone": "03-1111-2222",
+        "address": {
+            "@type": "PostalAddress",
+            "postalCode": "150-0001",
+            "addressRegion": "東京都",
+            "addressLocality": "渋谷区神宮前",
+            "streetAddress": "1-2-3"
+        }
+    }
+    </script>
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="https://couples.jp/">Couples トップ</a>
+            <a href="https://couples.jp/tokyo/">東京都のラブホテル一覧</a>
+        </nav>
+    </header>
+
+    <h1>ホテル アルファ</h1>
+    <p>〒150-0001 東京都渋谷区神宮前1-2-3</p>
+    <p>Tel: 03-1111-2222</p>
+
+    <div class="official-link">
+        <a href="https://alpha-hotel.example.com/">公式サイトはこちら</a>
+    </div>
+
+    <footer>
+        <a href="https://couples.jp/privacy">プライバシーポリシー</a>
+        <a href="https://couples.jp/hotel/23456/">近隣のホテル ベータ</a>
+    </footer>
+</body>
+</html>
