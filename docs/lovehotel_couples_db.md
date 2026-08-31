@@ -54,18 +54,25 @@ domain itself, `https://couples.jp/`, given directly in this DB's brief.
 This has two concrete consequences, different from the (also-unverified,
 but narrower) Good Smile case:
 
-1. **No `product_url_pattern`/facility-URL regex is configured.** Good
-   Smile's job could scope `internal_links` to a pattern because the
-   *product* URL shape was confirmed directly by a real, given URL (the one
-   product page). Couples gave no equivalent confirmed facility or
-   area-listing URL. Scoping `internal_links` to a guessed pattern here
-   risks silently excluding the very prefecture/area-listing pages a
-   nationwide crawl needs to traverse to ever reach a facility page at all
-   -- so `discovery.internal_links` is scoped only by domain
-   (`allowed_domains: [couples.jp, www.couples.jp]`), not by URL shape.
-   Classifying "is this actually a facility page" is done entirely inside
-   the adapter, from content actually observed on a fetched page (see
-   next section) -- never from a URL regex.
+1. **No facility-detail-URL *inclusion* pattern is configured.** Good
+   Smile's job could scope `internal_links` to an inclusion pattern because
+   the *product* URL shape was confirmed directly by a real, given URL (the
+   one product page). Couples gave no equivalent confirmed facility-detail
+   URL. Scoping `internal_links` to a guessed inclusion pattern here risks
+   silently excluding the very prefecture/area-listing pages a nationwide
+   crawl needs to traverse to ever reach a facility page at all -- so
+   `discovery.internal_links` is still scoped mainly by domain
+   (`allowed_domains: [couples.jp, www.couples.jp]`), not by a guessed
+   detail-URL shape. Classifying "is this actually a facility page" is done
+   entirely inside the adapter, from content actually observed on a fetched
+   page (see next section) -- never from a URL regex.
+   A real production test later DID confirm several couples.jp URL
+   categories that are never useful to fetch at all regardless of content
+   (login page, inquiry form, the site's own internal JSON API) -- the job
+   now sets `discovery.product_url_pattern` to a minimal, confirmed-junk
+   *exclusion* regex for exactly those (`^(?!.*/(?:login|inquiries|api)
+   (?:/|$)).*$`), which still passes every prefecture/city/area listing
+   page through untouched. See "Discovery" below.
 2. **No `prefecture_url_template` is configured**, even though
    `discovery/prefecture.py` already supports exactly this pattern
    generically (`https://example.com/area/{pref}/`-style expansion across
@@ -94,28 +101,60 @@ runs for the first production DB, before ever enabling this job.
 
 ## Facility-vs-listing classification (no guessed HTML selectors)
 
-`LoveHotelCouplesAdapter.extract()` treats a fetched page as a genuine
-facility page if ANY of these generically-observable signals is present:
+A real long-running production test (still read-only, still no guessed
+selectors) surfaced confirmed real couples.jp URLs the original
+content-only classification below mis-handled: prefecture/city/area/
+reservation SEARCH-RESULTS pages (`/hotels/search-by/...`) were being
+entity-ized (a listing page's own text routinely contains *some* facility's
+postal code or phone number, which the old unscoped checks treated as "this
+page IS a facility"), and unrelated footer/credit text was sometimes
+mis-read as a facility's own address (e.g. `〒001-2026 GNU Inc.`,
+`〒525-8448 最寄り` -- neither names a real prefecture). `extract()` now
+checks a URL veto **before** any content-based signal:
+
+* `_is_excluded_url()` unconditionally skips `/hotels/search-by/...`,
+  `/login`, `/inquiries/...`, and `/api/...` -- all four are real,
+  production-confirmed non-entity URLs, not a guess. `/hotels/search-by/`
+  pages are still fetched (see "Discovery" below) since real facility links
+  are only reachable by first crawling them; they are simply never
+  entity-ized.
+
+Only once a page clears that veto does `LoveHotelCouplesAdapter.extract()`
+treat it as a genuine facility page, if ANY of these generically-observable
+signals is present:
 
 1. A schema.org `LodgingBusiness` / `Hotel` / `LocalBusiness` JSON-LD
    block (the strongest signal, reusing `extract_common`'s existing
    JSON-LD parsing -- same mechanism `sample_local_business` and
    `figure_official_site` already rely on).
 2. A postal-code-shaped address (`〒nnn-nnnn ...`) found in the page's own
-   visible text -- a deliberately conservative fallback for sites (many
+   visible content -- a deliberately conservative fallback for sites (many
    small Japanese directories) that don't publish JSON-LD. This is a
-   generic Japanese postal-code pattern, not a Couples-specific selector.
+   generic Japanese postal-code pattern, not a Couples-specific selector,
+   now with two extra safeguards (`_extract_address_from_text()`): (a)
+   `<script>`/`<style>`/`<nav>`/`<header>`/`<footer>` content is stripped
+   before searching, and (b) a match is only accepted when its own text
+   contains one of Japan's 47 real prefecture names (`discovery/
+   prefecture.py`) -- a real address always names its prefecture; noise
+   like "GNU Inc." or "最寄り" does not, and is now rejected. A JSON-LD
+   address is also only trusted when it came from the SAME block that
+   confirmed signal 1, not from an unrelated `@type` block
+   `extract_common()` happened to pick up first.
 3. A numeric ID (3+ digits) found in the page's own canonical URL path --
    best-effort only, overridable in a later batch once the real URL scheme
-   is confirmed; documented in the adapter module as unverified.
+   is confirmed; documented in the adapter module as unverified. (The one
+   confirmed false positive this produced -- a *city* ID, `cities/567`, in
+   a `/hotels/search-by/...` URL -- is now caught by the URL veto above
+   before this signal is ever evaluated.)
 
-A page with **none** of these is skipped silently
-(`ExtractedRecord.skip = True`) -- the same "confirmed non-entity page"
-contract `figure_official_site` uses for Good Smile's listing pages, so a
-prefecture/area listing page never floods the Review Queue. A page that
-*does* look like a facility page but has no extractable name still goes to
-the Review Queue (`missing_required`) -- that is a real data-quality
-problem worth a human's attention, not something to drop silently.
+A page with **none** of these (and that wasn't already vetoed by URL) is
+skipped silently (`ExtractedRecord.skip = True`) -- the same "confirmed
+non-entity page" contract `figure_official_site` uses for Good Smile's
+listing pages, so a prefecture/area listing page never floods the Review
+Queue. A page that *does* look like a facility page but has no extractable
+name still goes to the Review Queue (`missing_required`) -- that is a real
+data-quality problem worth a human's attention, not something to drop
+silently.
 
 Prefecture and city are extracted from the address text only when the
 *exact* known prefecture name (`discovery/prefecture.py::PREFECTURES`,
@@ -144,6 +183,7 @@ discovery:
   allowed_domains:
     - "couples.jp"
     - "www.couples.jp"
+  product_url_pattern: '^(?!.*/(?:login|inquiries|api)(?:/|$)).*$'
 ```
 
 - `robots_seed_urls` picks up any `Sitemap:` directive couples.jp's own
@@ -158,6 +198,23 @@ discovery:
   query string) collapse to one `entity_candidates` row and one
   `fetch_queue` row via the existing `normalize_url()` +
   `UNIQUE(job_id, url)` infrastructure -- unchanged, reused as-is.
+- `product_url_pattern` was added after a real production test showed the
+  fetch_queue filling with couples.jp URLs that can never contain a
+  facility link: `https://couples.jp/api/prefectures/selectable` (this
+  site's own internal JSON API), `https://couples.jp/login`, and
+  `https://couples.jp/inquiries/input` (both hit the FetchEngine's
+  captcha/block detection). This is a confirmed-junk EXCLUSION regex, not a
+  guess at the facility-detail URL shape -- it still passes every
+  prefecture/city/area/reservation search-results listing page
+  (`/hotels/search-by/...`) through untouched, since those remain the only
+  way this crawl ever reaches real facility links (see
+  `tests/test_lovehotel_couples_discovery.py::
+  test_production_url_pattern_excludes_junk_but_keeps_navigation_and_detail_urls`
+  and `tests/test_production_job_lovehotel_couples.py::
+  test_product_url_pattern_excludes_login_inquiries_api_but_allows_navigation_and_detail_pages`).
+  Those same listing-page URLs are still never entity-ized -- that is done
+  independently at extraction time by the adapter's own `_is_excluded_url()`
+  (see "Facility-vs-listing classification" above).
 - `related_entities` (JSON-LD `sameAs` following, see
   `discovery/related_entity.py`) is **deliberately off**. That method has
   no domain restriction at all -- if a facility's `sameAs` ever pointed at

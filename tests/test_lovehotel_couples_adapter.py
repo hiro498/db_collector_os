@@ -9,6 +9,16 @@ extraction, facility ID extraction, official-site link extraction (present
 and absent), operating-status detection (explicit closed marker only,
 never guessed "open"), missing-name -> review, malformed page handling, and
 dedup fingerprinting via facility ID.
+
+Also covers the fix for a real long-running production test's findings (see
+the adapter module's own docstring for the full evidence): prefecture/
+city/area/reservation SEARCH-RESULTS pages
+(`/hotels/search-by/...`), `/login`, `/inquiries/...`, and `/api/...` were
+being wrongly entity-ized or crawled, and unrelated footer/credit text was
+sometimes mistaken for a facility's own address. The URLs and page titles
+used below (`福島県の予約ができるラブホ情報・ラブホテル一覧｜カップルズ` etc.,
+`〒001-2026 GNU Inc.`, `〒525-8448 最寄り`) are the exact real values observed
+in that production run.
 """
 
 from __future__ import annotations
@@ -24,6 +34,21 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 def load_fixture(name: str) -> str:
     return (FIXTURES_DIR / name).read_text(encoding="utf-8")
+
+
+def _search_results_html(canonical_url: str, name: str, footer_noise: str = "") -> str:
+    """A minimal reconstruction of a Couples prefecture/city/area/
+    reservation search-RESULTS page: a real `<title>`/`<h1>` (matching
+    production evidence exactly) and canonical URL, no LodgingBusiness
+    JSON-LD, optionally some unrelated footer/credit text (used to
+    reproduce the real "GNU Inc." / "最寄り" mis-extraction bug).
+    """
+    footer = f"<footer><p>{footer_noise}</p></footer>" if footer_noise else ""
+    return f"""
+    <html><head><meta charset="utf-8"><title>{name}</title>
+    <link rel="canonical" href="{canonical_url}"></head>
+    <body><h1>{name}</h1>{footer}</body></html>
+    """
 
 
 def test_adapter_is_registered():
@@ -201,3 +226,118 @@ def test_prefecture_and_city_never_guessed_when_address_missing():
     assert record.skip is False
     assert record.fields["prefecture"] is None
     assert record.fields["city"] is None
+
+
+# -- Real production-run evidence: search-results / login / inquiry / API
+# URLs must never become a love_hotel entity (see module docstring above
+# and db_collector_os/adapters/lovehotel_couples.py's own docstring). --
+
+
+def test_prefecture_search_results_page_is_never_an_entity():
+    url = "https://couples.jp/hotels/search-by/prefectures/7/reservation_all"
+    html = _search_results_html(url, "福島県の予約ができるラブホ情報・ラブホテル一覧｜カップルズ")
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+    assert not record.missing_required
+    assert record.name is None
+    assert record.address is None
+    assert record.telephone is None
+
+
+def test_city_search_results_page_is_never_an_entity():
+    url = "https://couples.jp/hotels/search-by/cities/567/reservation_all"
+    html = _search_results_html(url, "会津若松市の予約ができるラブホ情報・ラブホテル一覧｜カップルズ")
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    # cities/567 previously slipped through: the URL's own numeric ID
+    # ("567", 3+ digits) satisfied the old facility_id-based signal even
+    # though it is a city ID, not a facility ID.
+    assert record.skip is True
+
+
+def test_hotelarea_search_results_page_is_never_an_entity():
+    url = "https://couples.jp/hotels/search-by/hotelareas/57/reservation_all"
+    html = _search_results_html(url, "遊佐町エリアの予約ができるラブホ情報・ラブホテル一覧｜カップルズ")
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+
+
+def test_hotelareagroup_search_results_page_is_never_an_entity():
+    url = "https://couples.jp/hotels/search-by/hotelareagroups/10/reservation_all"
+    html = _search_results_html(url, "福島エリアの予約ができるラブホ情報・ラブホテル一覧｜カップルズ")
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+
+
+def test_search_results_page_garbage_footer_address_never_extracted():
+    """Reproduces the real production bug directly: a stray postal-code-
+    shaped string in unrelated footer/credit text ("〒001-2026 GNU Inc.")
+    must never surface as record.address."""
+    url = "https://couples.jp/hotels/search-by/prefectures/7/reservation_all"
+    html = _search_results_html(
+        url, "福島県の予約ができるラブホ情報・ラブホテル一覧｜カップルズ",
+        footer_noise="Powered by SomeLib 〒001-2026 GNU Inc.",
+    )
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+    assert record.address is None
+
+
+def test_non_vetoed_listing_page_with_garbage_postal_text_still_rejected():
+    """Defense in depth beyond the URL veto: even on a listing/nav-shaped
+    page whose URL isn't in the confirmed-excluded list, a postal-code-
+    shaped string with no real prefecture name attached ("〒525-8448
+    最寄り", a real production example) must not be accepted as an
+    address, and must not by itself make the page look like a facility."""
+    url = "https://couples.jp/some-other-listing-page/"
+    html = _search_results_html(url, "その他の一覧ページ", footer_noise="〒525-8448 最寄り")
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+    assert record.address is None
+
+
+def test_login_url_is_never_an_entity():
+    url = "https://couples.jp/login"
+    html = "<html><head><meta charset='utf-8'><title>ログイン - Couples</title></head><body><h1>ログイン</h1></body></html>"
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+
+
+def test_inquiries_url_is_never_an_entity():
+    url = "https://couples.jp/inquiries/input"
+    html = "<html><head><meta charset='utf-8'><title>お問い合わせ - Couples</title></head><body><h1>お問い合わせ</h1></body></html>"
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True
+
+
+def test_api_url_is_never_an_entity():
+    url = "https://couples.jp/api/prefectures/selectable"
+    html = "<html><head><meta charset='utf-8'><title>API</title></head><body>[]</body></html>"
+    adapter = get_adapter("lovehotel_couples")
+    common = extract_common(html, url)
+    record = adapter.extract(common, url, html)
+
+    assert record.skip is True

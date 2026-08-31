@@ -85,21 +85,30 @@ config:
     allowed_domains:
       - "couples.jp"
       - "www.couples.jp"
-    # No `product_url_pattern` here on purpose (unlike
-    # job_prod_figure_official_site's `/en/product/(\d+)/|.../scalefigure_list`
-    # pattern, which was derived from a CONFIRMED real product URL given
-    # directly by the operator). This environment has no confirmed Couples
-    # facility-URL or area-listing-URL shape to derive a pattern from --
-    # scoping internal_links to a guessed pattern risks silently excluding
-    # the very prefecture/area listing pages a nationwide crawl needs to
-    # traverse to ever reach facility pages at all (see
-    # docs/lovehotel_couples_db.md). Classification of "is this a facility
-    # page" is left entirely to lovehotel_couples.py's own content-based
-    # skip logic (JSON-LD LodgingBusiness/Hotel/LocalBusiness, a
-    # postal-code-shaped address, or a facility ID in the URL) -- not to
-    # URL-shape filtering. A follow-up batch can add a confirmed
-    # `product_url_pattern` here once real HTTP access verifies the actual
-    # scheme, exactly as the Good Smile job evolved across its own batches.
+    # A long-running production test surfaced a confirmed real problem this
+    # environment couldn't see in advance: with internal_links scoped only
+    # by domain, the job's fetch_queue filled with couples.jp URLs that can
+    # never yield a facility -- confirmed real examples from that run:
+    # https://couples.jp/api/prefectures/selectable (the site's own
+    # internal JSON API -- 404s as an HTML fetch), https://couples.jp/login,
+    # https://couples.jp/inquiries/input (both hit the FetchEngine's
+    # captcha/block detection). None of these ever contain a facility link
+    # to discover, so there is no discovery value in fetching them at all.
+    #
+    # This pattern is a confirmed-junk EXCLUSION list, not a guess at the
+    # facility-detail URL shape (unlike job_prod_figure_official_site's
+    # `/en/product/(\d+)/|.../scalefigure_list` inclusion pattern, derived
+    # from one confirmed real product URL): it still passes through every
+    # other couples.jp URL, prefecture/city/area/reservation search-results
+    # listing pages (`/hotels/search-by/...`) included -- those remain
+    # essential navigation for reaching real facility links and are still
+    # fetched, just never entity-ized (see lovehotel_couples.py's own
+    # `_is_excluded_url()`, which independently vetoes them at
+    # extraction time as defense in depth). A follow-up batch can still add
+    # a confirmed facility-detail INCLUSION pattern here once real HTTP
+    # access verifies the actual detail-page URL scheme, exactly as the
+    # Good Smile job evolved across its own batches.
+    product_url_pattern: '^(?!.*/(?:login|inquiries|api)(?:/|$)).*$'
   # See job_prod_figure_official_site.yaml for the full reasoning: lets one
   # run_once() call wait out this single domain's rate-limit gaps and keep
   # draining toward max_pages, instead of deferring to a brand-new run

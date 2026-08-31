@@ -3,23 +3,34 @@ point: facility-link extraction, tracking-param dedup, pagination
 following, and resilience to an empty/malformed list page.
 
 Unlike the Good Smile figure job, this job's `discovery.internal_links` is
-deliberately left UNSCOPED by any facility-URL regex (no
-`discovery.product_url_pattern` in config/jobs/prod_lovehotel_couples.yaml)
--- this authoring environment cannot verify couples.jp's real URL scheme
-(see docs/lovehotel_couples_db.md), so restricting internal_links to a
-guessed pattern risks silently excluding the very prefecture/area listing
-pages a nationwide crawl needs to traverse to reach facility pages at all.
-Classification of "is this actually a facility" is left entirely to the
-adapter's own skip logic (see test_lovehotel_couples_adapter.py), not to
-URL-shape filtering. This module only tests that internal-link discovery
-itself is correctly scoped to the couples.jp domain and dedupes normalized
-URLs, which is domain-agnostic infrastructure already used by every other
-adapter in this repo.
+NOT scoped by a guessed facility-detail-URL shape -- this authoring
+environment still cannot verify couples.jp's real facility-detail URL
+scheme (see docs/lovehotel_couples_db.md), so restricting internal_links to
+a guessed INCLUSION pattern would risk silently excluding the very
+prefecture/area listing pages a nationwide crawl needs to traverse to reach
+facility pages at all. Classification of "is this actually a facility" is
+left entirely to the adapter's own skip logic (see
+test_lovehotel_couples_adapter.py), not to URL-shape filtering.
+
+A real long-running production test DID surface confirmed-junk couples.jp
+URLs that are never useful to fetch at all (login page, inquiry form, the
+site's own internal JSON API -- see config/jobs/prod_lovehotel_couples.yaml
+for the exact real examples), so the production job now sets a minimal
+`discovery.product_url_pattern` EXCLUSION regex for those three categories
+only -- see `test_production_url_pattern_excludes_junk_but_keeps_navigation_and_detail_urls`
+below, which exercises that exact production pattern through
+`DiscoveryEngine.discover_from_page`. Every other test in this module still
+uses a job config with no `product_url_pattern` at all, to keep verifying
+that internal-link discovery itself is correctly scoped to the couples.jp
+domain and dedupes normalized URLs, which is domain-agnostic infrastructure
+already used by every other adapter in this repo.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+import yaml
 
 from db_collector_os.candidates import CandidateStore
 from db_collector_os.discovery.engine import DiscoveryEngine
@@ -28,6 +39,7 @@ from db_collector_os.extraction.common import extract_common
 from db_collector_os.fetching.client import FetchEngine
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+PROD_JOB_YAML = Path(__file__).parent.parent / "config" / "jobs" / "prod_lovehotel_couples.yaml"
 
 
 def load_fixture(name: str) -> str:
@@ -146,3 +158,45 @@ def test_repeated_discovery_calls_do_not_grow_fetch_queue_unboundedly(db, job_id
     assert second == []  # nothing genuinely new the second time
     total_rows = db.query_one("SELECT COUNT(*) AS n FROM entity_candidates WHERE job_id=?", (job_id,))
     assert total_rows["n"] == len(first)
+
+
+def test_production_url_pattern_excludes_junk_but_keeps_navigation_and_detail_urls(db, job_id):
+    """Exercises the ACTUAL production job's `discovery.product_url_pattern`
+    (read straight from config/jobs/prod_lovehotel_couples.yaml, not a
+    reimplementation) through the real DiscoveryEngine: login/inquiry/API
+    links found on a page must never enter the fetch_queue at all, while
+    prefecture/city/area search-results navigation links and (assumed)
+    facility-detail links are still discovered.
+    """
+    spec = yaml.safe_load(PROD_JOB_YAML.read_text(encoding="utf-8"))
+    product_url_pattern = spec["config"]["discovery"]["product_url_pattern"]
+
+    html = """
+    <html><body>
+    <nav>
+      <a href="https://couples.jp/hotels/search-by/prefectures/7/reservation_all">福島県</a>
+      <a href="https://couples.jp/login">ログイン</a>
+      <a href="https://couples.jp/inquiries/input">お問い合わせ</a>
+      <a href="https://couples.jp/api/prefectures/selectable">(internal API)</a>
+    </nav>
+    <ul>
+      <li><a href="https://couples.jp/hotel/12345/">ホテル アルファ</a></li>
+    </ul>
+    </body></html>
+    """
+    common = extract_common(html, "https://couples.jp/")
+
+    job = _job(job_id)
+    job["config_json"]["discovery"]["product_url_pattern"] = product_url_pattern
+
+    engine = _engine(db)
+    engine.discover_from_page(job, common, "couples.jp")
+
+    rows = db.query("SELECT url FROM entity_candidates WHERE job_id=?", (job_id,))
+    urls = {r["url"] for r in rows}
+
+    assert any("search-by/prefectures" in u for u in urls)
+    assert any("hotel/12345" in u for u in urls)
+    assert not any("/login" in u for u in urls)
+    assert not any("/inquiries/" in u for u in urls)
+    assert not any("/api/" in u for u in urls)

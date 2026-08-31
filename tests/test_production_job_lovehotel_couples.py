@@ -6,6 +6,7 @@ job (sample jobs or the first production DB's job).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -40,6 +41,36 @@ def test_production_job_yaml_exists_and_is_well_formed():
     dumped = yaml.safe_dump(spec)
     assert "happyhotel" not in dumped.lower()
     assert "navitime" not in dumped.lower()
+
+
+def test_product_url_pattern_excludes_login_inquiries_api_but_allows_navigation_and_detail_pages():
+    """A long-running production test found the job's fetch_queue filled
+    with couples.jp URLs that can never yield a facility (login page,
+    inquiry form, the site's own internal JSON API -- see the YAML's own
+    comments for the confirmed real examples). This is a confirmed-junk
+    EXCLUSION pattern, not a guess at the real facility-detail URL shape --
+    it must still pass prefecture/city/area/reservation search-results
+    listing pages (`/hotels/search-by/...`), which remain essential
+    navigation for reaching real facility links (see
+    lovehotel_couples.py::_is_excluded_url for the adapter-side veto that
+    keeps those from ever being entity-ized instead).
+    """
+    spec = yaml.safe_load(PROD_JOB_YAML.read_text(encoding="utf-8"))
+    pattern = spec["config"]["discovery"]["product_url_pattern"]
+    compiled = re.compile(pattern)
+
+    assert not compiled.search("https://couples.jp/login")
+    assert not compiled.search("https://couples.jp/login/")
+    assert not compiled.search("https://couples.jp/inquiries/input")
+    assert not compiled.search("https://couples.jp/api/prefectures/selectable")
+
+    assert compiled.search("https://couples.jp/hotels/search-by/prefectures/7/reservation_all")
+    assert compiled.search("https://couples.jp/hotels/search-by/cities/567/reservation_all")
+    assert compiled.search("https://couples.jp/hotel/12345/")
+    assert compiled.search("https://couples.jp/privacy")
+
+    # enabled must stay false regardless of this discovery-config change:
+    assert spec["enabled"] is False
 
 
 def test_job_id_does_not_collide_with_other_jobs():
