@@ -1,0 +1,91 @@
+# DB Collector OS - DB viability assessment tool: thresholds & scoring weights.
+#
+# Nothing about GO/HOLD/NO-GO should be a hardcoded number in Python -- every
+# threshold and weight the assessment logic uses lives here so it can be
+# tuned per theme category without a code change. Override the whole file
+# via `DB_COLLECTOR_VIABILITY_CONFIG=/path/to/other.yaml`.
+
+# ---------------------------------------------------------------------------
+# Phase 1: does search demand exist at all for this theme?
+# A theme failing this gate is NO-GO and never reaches Phase 2.
+# ---------------------------------------------------------------------------
+phase1_gate:
+  min_total_search_volume: 300     # theme-level total monthly volume floor
+  min_kw_with_volume_count: 3      # need at least this many keywords with any volume
+  min_longtail_kw_count: 3         # need at least this many non-main keywords
+  small_volume_threshold: 10       # a keyword at/under this volume counts as "zero/tiny"
+
+# ---------------------------------------------------------------------------
+# Phase 2: how to turn one keyword's SERP results into WEAK/MEDIUM/STRONG.
+# A result's competitor-strength contribution = site_type_weight, plus
+# bonuses/penalties below, summed over the top `results_considered` results,
+# then averaged. That 0-100 "strength_score" is mapped to a label using the
+# two cut points.
+# ---------------------------------------------------------------------------
+competition_classification:
+  results_considered: 5
+  strong_min_score: 60
+  medium_min_score: 32
+  site_type_weight:
+    major_corp: 80
+    major_ec: 80
+    expert_media: 65
+    portal: 55
+    specialty_store: 30
+    small_business: 18
+    personal: 10
+    unknown: 35
+  page_type_adjustment:
+    listing: 10          # a listing/category page is a stronger competitor than a single article
+    product: 4
+    article: 0
+  db_type_page_bonus: 20       # a genuine DB-type page among the results raises strength a lot
+  title_exact_match_bonus: 12
+  title_partial_match_bonus: 4
+  intent_unsatisfied_relief: 25  # subtracted per result when intent is NOT satisfied -- opportunity signal
+
+# ---------------------------------------------------------------------------
+# Scoring: Demand / Competition / DB Fit -> Priority.
+# ---------------------------------------------------------------------------
+scoring:
+  demand:
+    # demand_score = min(100, demand_volume_points + demand_breadth_points)
+    reference_volume: 5000     # theme total volume that maps to ~full volume points
+    volume_points_max: 70
+    breadth_points_per_kw: 3   # points per keyword-with-volume, up to breadth_points_max
+    breadth_points_max: 30
+  competition:
+    # competition_score (0-100, higher = harder) = weighted avg of per-keyword
+    # strength_score across all Phase 2 keywords for the theme.
+    strength_label_score:
+      WEAK: 20
+      MEDIUM: 55
+      STRONG: 88
+  db_fit:
+    # db_fit_score rewards a theme that actually has many independent search
+    # axes (category/type/attribute/.../region/brand/motif) AND a high ratio
+    # of longtail keywords relative to the whole candidate set -- both are
+    # what make a *database* (many structured detail pages) the right format,
+    # as opposed to a single article.
+    points_per_axis: 8
+    axis_points_max: 56
+    longtail_ratio_points_max: 44
+  priority:
+    weights:
+      demand: 0.40
+      competition_ease: 0.35   # ease = 100 - competition_score
+      db_fit: 0.25
+
+# ---------------------------------------------------------------------------
+# Final GO / HOLD / NO-GO decision. Rules apply in order; the first match wins.
+# ---------------------------------------------------------------------------
+final_judgement:
+  # explicit shortcuts from the spec's basic rules, checked before falling
+  # back to the generic priority_score thresholds
+  no_go_if_phase1_fail: true
+  go_if_weak_ratio_at_least: 0.55        # demand exists + longtail mostly weak -> GO
+  no_go_if_strong_ratio_at_least: 0.70   # demand exists but longtail mostly strong -> NO-GO
+  # generic thresholds against priority_score for everything else
+  go_priority_min: 55
+  hold_priority_min: 35
+  # below hold_priority_min -> NO-GO

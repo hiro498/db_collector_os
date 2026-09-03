@@ -28,6 +28,7 @@ repository; the VPS only pulls, installs, and runs.
   - [Update](#update)
   - [Rollback](#rollback)
 - [Add a new DB](#add-a-new-db) ([Production DB #1 reference](docs/first_production_db.md))
+- [DB viability assessment tool](docs/db_viability_tool.md) -- decide GO/HOLD/NO-GO for a candidate DB theme before building it
 - [Add a new Adapter](#add-a-new-adapter)
 - [Add a new Job](#add-a-new-job)
 - [Admin UI](#admin-ui)
@@ -350,6 +351,8 @@ db-collector review resolve REVIEW_ID
 db-collector scheduler run [--once]   # foreground loop, or a single tick
 db-collector worker run [--once]      # foreground loop, or a single job
 db-collector admin serve [--host H --port P]
+
+db-collector viability ...                    # DB viability assessment tool -- see docs/db_viability_tool.md
 ```
 
 ## systemd

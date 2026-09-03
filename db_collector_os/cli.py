@@ -42,6 +42,7 @@ from .resource_controller import ResourceController
 from .review import ReviewQueue
 from .run_history import RunHistoryStore
 from .scheduler import Scheduler
+from .viability.cli import viability
 from .worker import Worker, run_job_and_record
 
 
@@ -409,6 +410,9 @@ def admin_serve(ctx: click.Context, host: str | None, port: int | None) -> None:
     config: AppConfig = ctx.obj["config"]
     app = create_app(config)
     uvicorn.run(app, host=host or config.admin_host, port=port or config.admin_port)
+
+
+main.add_command(viability)
 
 
 if __name__ == "__main__":
