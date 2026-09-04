@@ -9,7 +9,9 @@ expose it safely (SSH tunnel or an authenticating reverse proxy). Never bind
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -20,13 +22,49 @@ from ..config import AppConfig
 from ..database import Database
 from ..fetching import FetchQueue
 from ..job_registry import JobRegistry
-from ..lovehotel_audit import LOVEHOTEL_JOB_ID, lovehotel_summary
 from ..metrics import MetricsStore
 from ..resource_controller import ResourceController
 from ..review import ReviewQueue
 from ..run_history import RunHistoryStore
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_lovehotel_summary(d: Database) -> dict[str, Any] | None:
+    """Best-effort only: `lovehotel_audit` is expected to evolve on its own
+    (Phase 1B classification work), so an API this dashboard doesn't yet
+    know about (missing symbol, changed return shape) must never take the
+    rest of the Admin Dashboard down with it -- it just means the 全国ラブ
+    ホテルDB section is skipped for this request. Returns None either when
+    the job isn't present in this DB or when the summary can't be produced.
+    """
+    try:
+        from ..lovehotel_audit import LOVEHOTEL_JOB_ID, lovehotel_summary
+
+        summary = lovehotel_summary(d, LOVEHOTEL_JOB_ID)
+        if not summary.get("db_present"):
+            return None
+        # Touch every key dashboard.html actually renders now, so a shape
+        # mismatch is caught here (section silently omitted) instead of
+        # surfacing as a Jinja error on every dashboard load.
+        c = summary["classification"]
+        _ = (c["total"], c["counts"]["facility"], c["counts"]["listing"], c["counts"]["homepage"],
+             c["counts"]["closed"], c["counts"]["incomplete"], c["counts"]["unknown"])
+        cov = summary["coverage"]
+        _ = (cov["prefecture_covered_count"], cov["prefecture_total"], cov["prefecture_info_rate"], cov["city_info_rate"])
+        col = summary["collection"]
+        _ = (col["total_candidates"], col["new_candidates"], col["fetch_done"], col["fetch_queued"],
+             col["fetch_failed"], col["duplicate_candidates"], col["review_candidates"])
+        rev = summary["review"]
+        _ = (rev["total_open"], rev["order"], rev["labels"], rev["buckets"])
+        comp = summary["completion"]
+        _ = (comp["complete"], comp["order"], comp["labels"], comp["gates"])
+        return summary
+    except Exception:
+        logger.exception("lovehotel dashboard summary unavailable; omitting section")
+        return None
 
 
 def create_app(config: AppConfig) -> FastAPI:
@@ -47,7 +85,7 @@ def create_app(config: AppConfig) -> FastAPI:
         snap = resources.snapshot()
 
         all_jobs = jobs.list()
-        lovehotel = lovehotel_summary(d, LOVEHOTEL_JOB_ID)
+        lovehotel = _safe_lovehotel_summary(d)
         ctx = {
             "db_count": len({j["target_db"] for j in all_jobs}),
             "active_jobs": sum(1 for j in all_jobs if j["enabled"]),
@@ -59,7 +97,7 @@ def create_app(config: AppConfig) -> FastAPI:
             "today": today,
             "resources": snap.as_dict(),
             "thresholds": config.resource_thresholds,
-            "lovehotel": lovehotel if lovehotel["db_present"] else None,
+            "lovehotel": lovehotel,
         }
         return templates.TemplateResponse(request, "dashboard.html", ctx)
 

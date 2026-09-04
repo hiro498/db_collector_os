@@ -75,6 +75,28 @@ class TestExistingFigureDashboardRegression:
         resp = client.get("/jobs/job_prod_figure")
         assert resp.status_code == 200
 
+    def test_dashboard_survives_an_incompatible_lovehotel_audit_module(
+        self, app_config: AppConfig, db: Database, monkeypatch,
+    ):
+        """`lovehotel_audit` is expected to evolve independently (Phase 1B
+        classification work) -- an API this dashboard doesn't recognize yet
+        (missing key, changed shape) must degrade to "section omitted", not
+        break every other Admin Dashboard route.
+        """
+        import db_collector_os.lovehotel_audit as lovehotel_audit
+
+        _make_lovehotel_job(db)
+
+        def incompatible_summary(db, job_id):
+            return {"db_present": True, "totally_different_shape": True}
+
+        monkeypatch.setattr(lovehotel_audit, "lovehotel_summary", incompatible_summary)
+        client = _client(app_config)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "全国ラブホテルDB" not in resp.text
+        assert "Registered DBs" in resp.text
+
 
 class TestLovehotelDashboardSection:
     def test_section_appears_when_job_exists(self, app_config: AppConfig, db: Database):
