@@ -30,4 +30,83 @@
     <div class="card"><div class="value">{{ "%.1f"|format(resources.swap_percent) }}%</div><div class="label">Swap (max {{ thresholds.swap_percent_max }}%)</div></div>
     <div class="card"><div class="value">{{ "%.2f"|format(resources.load_average) }}</div><div class="label">Load avg (max {{ thresholds.load_average_max }})</div></div>
 </div>
+
+{% if lovehotel %}
+<h1>全国ラブホテルDB</h1>
+
+<h2>DB状態</h2>
+<div class="cards">
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.facility }}</div><div class="label">有効施設</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.total }}</div><div class="label">総Entity</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.listing }}</div><div class="label">一覧ページ誤受理</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.homepage }}</div><div class="label">ホームページ</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.closed }}</div><div class="label">閉店</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.incomplete }}</div><div class="label">不完全</div></div>
+    <div class="card"><div class="value">{{ lovehotel.classification.counts.unknown }}</div><div class="label">判定不能</div></div>
+</div>
+<p style="font-size:0.85rem;color:#666;">「有効施設」は実際に1施設を指すと確認できたEntityのみ (schema.orgの事業者情報など強いシグナルを伴うもの)。総Entity数をそのまま有効施設数として扱っていません。</p>
+
+<h2>全国カバレッジ (実施設 = 有効施設 + 閉店 のみを母数とする)</h2>
+<div class="cards">
+    <div class="card"><div class="value">{{ lovehotel.coverage.prefecture_covered_count }} / {{ lovehotel.coverage.prefecture_total }}</div><div class="label">都道府県カバレッジ</div></div>
+    <div class="card"><div class="value">{{ "%.1f"|format(lovehotel.coverage.prefecture_info_rate * 100) }}%</div><div class="label">都道府県情報充足率</div></div>
+    <div class="card"><div class="value">{{ "%.1f"|format(lovehotel.coverage.city_info_rate * 100) }}%</div><div class="label">市区町村情報充足率</div></div>
+</div>
+
+<h2>収集状況</h2>
+<div class="cards">
+    <div class="card"><div class="value">{{ lovehotel.collection.total_candidates }}</div><div class="label">候補総数</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.new_candidates }}</div><div class="label">新規候補</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.fetch_done }}</div><div class="label">取得済み</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.fetch_queued }}</div><div class="label">取得待ち</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.fetch_failed }}</div><div class="label">取得失敗</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.duplicate_candidates }}</div><div class="label">重複</div></div>
+    <div class="card"><div class="value">{{ lovehotel.collection.review_candidates }}</div><div class="label">Review</div></div>
+</div>
+
+<h2>Review Queue内訳 (open: {{ lovehotel.review.total_open }})</h2>
+<table>
+    <thead><tr><th>Category</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for key in lovehotel.review.order %}
+        <tr><td>{{ lovehotel.review.labels[key] }}</td><td>{{ lovehotel.review.buckets[key] }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h2>Job状態</h2>
+{% if lovehotel.job %}
+<table>
+    <thead><tr><th>JOB ID</th><th>ENABLED</th><th>STATUS</th><th>PHASE</th><th>LAST RUN</th><th>LATEST RUN STATUS</th><th>FETCHED</th><th>INSERTED</th><th>UPDATED</th><th>ERRORS</th></tr></thead>
+    <tbody>
+        <tr>
+            <td>{{ lovehotel.job.job_id }}</td>
+            <td>{{ "YES" if lovehotel.job.enabled else "NO" }}</td>
+            <td><span class="badge status-{{ lovehotel.job.status }}">{{ lovehotel.job.status }}</span></td>
+            <td>{{ lovehotel.job.phase }}</td>
+            <td>{{ lovehotel.job.last_started_at or "-" }}</td>
+            <td>{{ lovehotel.job.last_run.status if lovehotel.job.last_run else "-" }}</td>
+            <td>{{ lovehotel.job.last_run.fetched_count if lovehotel.job.last_run else "-" }}</td>
+            <td>{{ lovehotel.job.last_run.inserted_count if lovehotel.job.last_run else "-" }}</td>
+            <td>{{ lovehotel.job.last_run.updated_count if lovehotel.job.last_run else "-" }}</td>
+            <td>{{ lovehotel.job.last_run.error_count if lovehotel.job.last_run else "-" }}</td>
+        </tr>
+    </tbody>
+</table>
+{% endif %}
+
+<h2>完成状況</h2>
+<div class="cards">
+    <div class="card"><div class="value">STATUS=未完成</div></div>
+    <div class="card"><div class="value">NATIONWIDE_LOVEHOTEL_DB_COMPLETE={{ "YES" if lovehotel.completion.complete else "NO" }}</div></div>
+</div>
+<table>
+    <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for key in lovehotel.completion.order %}
+        <tr><td>{{ lovehotel.completion.labels[key] }}</td><td>{{ "PASS" if lovehotel.completion.gates[key] else "NOT MET" }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 {% endblock %}

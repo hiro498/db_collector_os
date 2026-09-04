@@ -146,6 +146,19 @@ def status(ctx: click.Context) -> None:
     click.echo(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
+@main.command("lovehotel-status")
+@click.option("--job-id", default=None, help="Defaults to job_prod_lovehotel_couples")
+@click.pass_context
+def lovehotel_status(ctx: click.Context, job_id: str | None) -> None:
+    """全国ラブホテルDB status summary (mirrors the Admin UI's dashboard
+    section -- both call `lovehotel_audit.lovehotel_summary`, read-only)."""
+    from .lovehotel_audit import LOVEHOTEL_JOB_ID, lovehotel_summary
+
+    db = _db(ctx)
+    summary = lovehotel_summary(db, job_id or LOVEHOTEL_JOB_ID)
+    click.echo(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+
+
 # --------------------------------------------------------------------------
 # jobs
 # --------------------------------------------------------------------------

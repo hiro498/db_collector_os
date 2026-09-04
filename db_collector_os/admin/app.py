@@ -20,6 +20,7 @@ from ..config import AppConfig
 from ..database import Database
 from ..fetching import FetchQueue
 from ..job_registry import JobRegistry
+from ..lovehotel_audit import LOVEHOTEL_JOB_ID, lovehotel_summary
 from ..metrics import MetricsStore
 from ..resource_controller import ResourceController
 from ..review import ReviewQueue
@@ -46,6 +47,7 @@ def create_app(config: AppConfig) -> FastAPI:
         snap = resources.snapshot()
 
         all_jobs = jobs.list()
+        lovehotel = lovehotel_summary(d, LOVEHOTEL_JOB_ID)
         ctx = {
             "db_count": len({j["target_db"] for j in all_jobs}),
             "active_jobs": sum(1 for j in all_jobs if j["enabled"]),
@@ -57,6 +59,7 @@ def create_app(config: AppConfig) -> FastAPI:
             "today": today,
             "resources": snap.as_dict(),
             "thresholds": config.resource_thresholds,
+            "lovehotel": lovehotel if lovehotel["db_present"] else None,
         }
         return templates.TemplateResponse(request, "dashboard.html", ctx)
 
