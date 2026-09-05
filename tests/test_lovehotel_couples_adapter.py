@@ -35,7 +35,7 @@ def test_adapter_is_registered():
 
 def test_facility_with_json_ld_extracts_full_record():
     html = load_fixture("couples_facility_detail_full.html")
-    url = "https://couples.jp/hotel/12345/"
+    url = "https://couples.jp/hotel-details/12345/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -58,7 +58,7 @@ def test_facility_with_json_ld_extracts_full_record():
 
 def test_facility_without_json_ld_falls_back_to_text_address_and_url_id():
     html = load_fixture("couples_facility_detail_no_jsonld.html")
-    url = "https://couples.jp/hotel/34567/"
+    url = "https://couples.jp/hotel-details/34567/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -75,7 +75,7 @@ def test_facility_without_json_ld_falls_back_to_text_address_and_url_id():
 
 def test_missing_official_url_is_none_not_guessed():
     html = load_fixture("couples_facility_detail_no_official_url.html")
-    url = "https://couples.jp/hotel/45678/"
+    url = "https://couples.jp/hotel-details/45678/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -88,7 +88,7 @@ def test_missing_official_url_is_none_not_guessed():
 
 def test_explicit_closed_marker_sets_operating_status_closed():
     html = load_fixture("couples_facility_detail_closed.html")
-    url = "https://couples.jp/hotel/56789/"
+    url = "https://couples.jp/hotel-details/56789/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -102,7 +102,7 @@ def test_missing_name_on_a_genuine_facility_page_goes_to_review_not_skip():
     but no extractable name -> a real data-quality problem worth review,
     NOT a silent skip (see ExtractedRecord.missing_required vs .skip)."""
     html = load_fixture("couples_facility_detail_missing_name.html")
-    url = "https://couples.jp/hotel/67890/"
+    url = "https://couples.jp/hotel-details/67890/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -150,11 +150,11 @@ def test_facility_id_and_fingerprint_shared_across_different_urls_for_same_facil
     html = load_fixture("couples_facility_detail_full.html")
     adapter = get_adapter("lovehotel_couples")
 
-    url1 = "https://couples.jp/hotel/12345/"
+    url1 = "https://couples.jp/hotel-details/12345/"
     common1 = extract_common(html, url1)
     record1 = adapter.extract(common1, url1, html)
 
-    url2 = "https://couples.jp/hotel/12345/?utm_source=list"
+    url2 = "https://couples.jp/hotel-details/12345/?utm_source=list"
     common2 = extract_common(html, url2)
     record2 = adapter.extract(common2, url2, html)
 
@@ -172,7 +172,7 @@ def test_same_name_different_facility_extracts_as_a_distinct_record():
     Deduplicator (exercised in test_lovehotel_couples_pipeline_integration.py)
     is what keeps these from being auto-merged."""
     html = load_fixture("couples_facility_detail_conflict.html")
-    url = "https://couples.jp/hotel/99999/"
+    url = "https://couples.jp/hotel-details/99999/"
     adapter = get_adapter("lovehotel_couples")
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
@@ -188,10 +188,10 @@ def test_prefecture_and_city_never_guessed_when_address_missing():
     adapter = get_adapter("lovehotel_couples")
     html = """
     <html><head><meta charset="utf-8"><title>No Address Facility</title>
-    <link rel="canonical" href="https://couples.jp/hotel/11122/"></head>
+    <link rel="canonical" href="https://couples.jp/hotel-details/11122/"></head>
     <body><h1>ホテル 住所不明</h1></body></html>
     """
-    url = "https://couples.jp/hotel/11122/"
+    url = "https://couples.jp/hotel-details/11122/"
     common = extract_common(html, url)
     record = adapter.extract(common, url, html)
 

@@ -16,20 +16,32 @@ Design notes (see docs/lovehotel_couples_db.md for the full rationale):
   prefecture / city / address / detail URL / official URL / operating
   status / source facility ID), NOT deep attributes (price, rooms, plans,
   reviews) -- see class docstring below and the job's `required_fields`.
-- This authoring environment has no outbound web access to couples.jp
-  (confirmed: the agent network proxy rejects the CONNECT to couples.jp:443
-  with a policy 403), so -- exactly like the first production DB's Good
-  Smile job -- no URL pattern, pagination scheme, or HTML structure below
-  is guessed as verified fact. Classification of "this is a facility detail
-  page" relies only on generically-observable signals: a schema.org
-  LodgingBusiness/Hotel/LocalBusiness JSON-LD block, OR a postal-code-
-  shaped address string found in the page's own visible text, OR a numeric
-  facility ID captured from the page's own canonical URL. A page with none
-  of those is treated as a confirmed non-entity page (area/prefecture
-  listing, nav, footer, ...) and skipped silently, the same
-  `ExtractedRecord.skip` contract `figure_official_site` uses for listing
-  pages. See docs/lovehotel_couples_db.md for why discovery deliberately
-  does not scope `internal_links` to a guessed facility-URL regex.
+- The real Couples facility detail URL shape IS now confirmed (given
+  directly in this DB's brief, with a worked example):
+  `https://couples.jp/hotel-details/{numeric_id}`
+  (e.g. `https://couples.jp/hotel-details/1238`), and
+  `/prefectures/`, `/articles/`, `/themes/`, `/movies`, `/hotel-groups/`,
+  `/users/` are confirmed NOT facility pages. Facility-ID extraction below
+  reuses `discovery.lovehotel_couples.canonicalize_couples_facility_url`
+  (the single source of truth for this URL shape, also used by the
+  dedicated nationwide facility-discovery module) instead of a generic
+  "any 3+ digit path segment" guess -- the earlier, unverified version of
+  this adapter used exactly that generic guess, which is what let pages
+  like `/articles/1234` or `/themes/456` be misclassified as facilities by
+  `bool(facility_id)` alone (a production audit found the resulting
+  `entities` table mostly non-facility pages, genuine facilities a small
+  minority -- see docs/lovehotel_couples_db.md). This adapter still keeps a
+  JSON-LD LodgingBusiness/Hotel/LocalBusiness block and a postal-code-shaped
+  address as additional, independent facility signals (a page could in
+  principle be reached by some URL this adapter doesn't recognize), but a
+  confirmed `/hotel-details/{id}` URL is by itself the strongest and most
+  precise one now available. This job's own `internal_links` discovery
+  config is left unchanged (still domain-scoped, not URL-pattern-scoped) --
+  the real prefecture/area/pagination navigation URL scheme is still not
+  independently confirmed from this authoring environment, and the
+  dedicated `discovery/lovehotel_couples.py` module (used by
+  `db-collector couples discover-dry-run`) is where nationwide,
+  facility-URL-precise discovery now lives instead.
 - Official site URLs found on a facility's Couples page are captured into
   `fields.official_url` (with evidence) but are NEVER auto-enqueued into
   this job's own fetch_queue -- Phase 1 must never grow into
@@ -55,6 +67,7 @@ from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
+from ..discovery.lovehotel_couples import canonicalize_couples_facility_url
 from ..discovery.prefecture import PREFECTURES
 from .base import Adapter, ExtractedRecord
 from .registry import register_adapter
@@ -62,13 +75,6 @@ from .registry import register_adapter
 SOURCE_NAME = "Couples"
 
 _BUSINESS_TYPES = {"LodgingBusiness", "Hotel", "LocalBusiness"}
-
-# Best-effort, not a confirmed Couples URL scheme (see module docstring):
-# a run of 3+ digits in the URL PATH (never the query string) is treated as
-# a candidate facility ID, e.g. ".../hotel/12345/" -> "12345". Overridable
-# per job via config_json.discovery.facility_id_pattern once real HTTP
-# access confirms the actual scheme, without needing an adapter change.
-_DEFAULT_FACILITY_ID_RE = re.compile(r"/(\d{3,})(?:[/?]|$)")
 
 # A postal code is a strong, low-false-positive signal that a page is
 # describing one specific physical facility (as opposed to a prefecture/
@@ -167,13 +173,20 @@ def _types(block: dict[str, Any]) -> set[str]:
 
 
 def _extract_facility_id(canonical_url: str | None, url: str) -> str | None:
+    """The numeric hotel id from a CONFIRMED `/hotel-details/{id}` URL
+    (including any derived /review, /rooms, /coupon, /plan sub-path, a
+    tracking query string, or a trailing slash -- all collapse to the same
+    id via `canonicalize_couples_facility_url`). Returns None for any URL
+    that isn't actually this shape, e.g. `/articles/1234` or `/themes/456`
+    -- see module docstring for why a generic "any numeric path segment"
+    guess was replaced with this precise, confirmed check.
+    """
     for candidate in (canonical_url, url):
         if not candidate:
             continue
-        path = urlsplit(candidate).path
-        match = _DEFAULT_FACILITY_ID_RE.search(path)
-        if match:
-            return match.group(1)
+        canonical = canonicalize_couples_facility_url(candidate)
+        if canonical:
+            return canonical.rsplit("/", 1)[-1]
     return None
 
 

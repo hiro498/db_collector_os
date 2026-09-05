@@ -74,20 +74,20 @@ def _mock_base_site():
         responses.GET, "https://couples.jp/tokyo", status=200, content_type="text/html",
         body=_list_html(
             "https://couples.jp/tokyo", "東京都のラブホテル一覧",
-            ["https://couples.jp/hotel/12345", "https://couples.jp/hotel/23456"],
+            ["https://couples.jp/hotel-details/12345", "https://couples.jp/hotel-details/23456"],
         ),
     )
     responses.add(
-        responses.GET, "https://couples.jp/hotel/12345", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/12345", status=200, content_type="text/html",
         body=_facility_html(
-            "https://couples.jp/hotel/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3",
+            "https://couples.jp/hotel-details/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3",
             "03-1111-2222", official_href="https://alpha-hotel.example.com/",
         ),
     )
     responses.add(
-        responses.GET, "https://couples.jp/hotel/23456", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/23456", status=200, content_type="text/html",
         body=_facility_html(
-            "https://couples.jp/hotel/23456", "ホテル ベータ", "160-0022", "東京都新宿区新宿1-1-1", "03-2222-3333",
+            "https://couples.jp/hotel-details/23456", "ホテル ベータ", "160-0022", "東京都新宿区新宿1-1-1", "03-2222-3333",
         ),
     )
 
@@ -123,7 +123,7 @@ def test_pipeline_creates_entities_with_evidence_and_skips_area_list(app_config,
 
     evidence = db.query("SELECT * FROM evidence WHERE entity_id=?", (alpha["entity_id"],))
     assert len(evidence) > 0
-    assert all(e["source_url"] == "https://couples.jp/hotel/12345" for e in evidence)
+    assert all(e["source_url"] == "https://couples.jp/hotel-details/12345" for e in evidence)
 
     # the list page's fetch-queue row is 'done' but produced no review noise:
     review_rows = db.query("SELECT * FROM review_queue WHERE job_id=?", (job_id,))
@@ -134,16 +134,16 @@ def test_pipeline_creates_entities_with_evidence_and_skips_area_list(app_config,
 def test_missing_name_facility_page_goes_to_review(app_config, db):
     responses.add(responses.GET, "https://couples.jp/robots.txt", status=404)
     responses.add(
-        responses.GET, "https://couples.jp/hotel/67890", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/67890", status=200, content_type="text/html",
         body="""
         <html><head><meta charset="utf-8">
-        <link rel="canonical" href="https://couples.jp/hotel/67890"></head>
+        <link rel="canonical" href="https://couples.jp/hotel-details/67890"></head>
         <body><p>〒460-0001 愛知県名古屋市中区栄1-1-1</p></body></html>
         """,
     )
     jr = JobRegistry(db)
     job_id = make_lovehotel_job(jr, config={
-        "seed_urls": ["https://couples.jp/hotel/67890"],
+        "seed_urls": ["https://couples.jp/hotel-details/67890"],
         "discovery": {"internal_links": False, "related_entities": False},
     })
     worker = Worker(app_config, worker_id="lovehotel-test-worker-2", db=db)
@@ -162,17 +162,17 @@ def test_missing_name_facility_page_goes_to_review(app_config, db):
 def test_duplicate_across_urls_merges_via_facility_id(app_config, db):
     responses.add(responses.GET, "https://couples.jp/robots.txt", status=404)
     html = _facility_html(
-        "https://couples.jp/hotel/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
+        "https://couples.jp/hotel-details/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
     )
-    responses.add(responses.GET, "https://couples.jp/hotel/12345", status=200, content_type="text/html", body=html)
+    responses.add(responses.GET, "https://couples.jp/hotel-details/12345", status=200, content_type="text/html", body=html)
     responses.add(
-        responses.GET, "https://couples.jp/hotel/12345?ref=list", status=200, content_type="text/html", body=html,
+        responses.GET, "https://couples.jp/hotel-details/12345?ref=list", status=200, content_type="text/html", body=html,
     )
     jr = JobRegistry(db)
     job_id = make_lovehotel_job(jr, config={
         "seed_urls": [
-            "https://couples.jp/hotel/12345",
-            "https://couples.jp/hotel/12345?ref=list",
+            "https://couples.jp/hotel-details/12345",
+            "https://couples.jp/hotel-details/12345?ref=list",
         ],
         "discovery": {"internal_links": False, "related_entities": False},
     })
@@ -196,21 +196,21 @@ def test_same_name_different_address_is_never_auto_merged(app_config, db):
     collapse into one entity."""
     responses.add(responses.GET, "https://couples.jp/robots.txt", status=404)
     responses.add(
-        responses.GET, "https://couples.jp/hotel/12345", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/12345", status=200, content_type="text/html",
         body=_facility_html(
-            "https://couples.jp/hotel/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
+            "https://couples.jp/hotel-details/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
         ),
     )
     responses.add(
-        responses.GET, "https://couples.jp/hotel/99999", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/99999", status=200, content_type="text/html",
         body=_facility_html(
-            "https://couples.jp/hotel/99999", "ホテル アルファ", "220-0001", "神奈川県横浜市西区北幸1-1-1",
+            "https://couples.jp/hotel-details/99999", "ホテル アルファ", "220-0001", "神奈川県横浜市西区北幸1-1-1",
             "045-555-6666",
         ),
     )
     jr = JobRegistry(db)
     job_id = make_lovehotel_job(jr, config={
-        "seed_urls": ["https://couples.jp/hotel/12345", "https://couples.jp/hotel/99999"],
+        "seed_urls": ["https://couples.jp/hotel-details/12345", "https://couples.jp/hotel-details/99999"],
         "discovery": {"internal_links": False, "related_entities": False},
     })
     worker = Worker(app_config, worker_id="lovehotel-test-worker-4", db=db)
@@ -231,17 +231,17 @@ def test_same_name_different_address_is_never_auto_merged(app_config, db):
 def test_retry_then_permanent_failure_does_not_block_other_facilities(app_config, db):
     responses.add(responses.GET, "https://couples.jp/robots.txt", status=404)
     responses.add(
-        responses.GET, "https://couples.jp/hotel/12345", status=200, content_type="text/html",
+        responses.GET, "https://couples.jp/hotel-details/12345", status=200, content_type="text/html",
         body=_facility_html(
-            "https://couples.jp/hotel/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
+            "https://couples.jp/hotel-details/12345", "ホテル アルファ", "150-0001", "東京都渋谷区神宮前1-2-3", "03-1111-2222",
         ),
     )
-    responses.add(responses.GET, "https://couples.jp/hotel/down", status=503)
-    responses.add(responses.GET, "https://couples.jp/hotel/down", status=503)
+    responses.add(responses.GET, "https://couples.jp/hotel-details/down", status=503)
+    responses.add(responses.GET, "https://couples.jp/hotel-details/down", status=503)
 
     jr = JobRegistry(db)
     job_id = make_lovehotel_job(jr, config={
-        "seed_urls": ["https://couples.jp/hotel/12345", "https://couples.jp/hotel/down"],
+        "seed_urls": ["https://couples.jp/hotel-details/12345", "https://couples.jp/hotel-details/down"],
         "discovery": {"internal_links": False, "related_entities": False},
     })
     ctx = CollectorContext.build(app_config, db)

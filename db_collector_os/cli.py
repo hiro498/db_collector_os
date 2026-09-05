@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -33,7 +34,14 @@ from .collectors import CollectorContext
 from .collectors.pipeline import ensure_seed_urls_queued
 from .config import AppConfig, load_config
 from .database import Database
+from .discovery.lovehotel_couples import (
+    FixtureFetchEngine,
+    discover_all_prefectures,
+    format_dry_run_report,
+    to_json_summary,
+)
 from .fetching import FetchQueue
+from .fetching.client import FetchEngine
 from .job_registry import JobRegistry
 from .logging_config import get_logger
 from .metrics import MetricsStore
@@ -409,6 +417,93 @@ def admin_serve(ctx: click.Context, host: str | None, port: int | None) -> None:
     config: AppConfig = ctx.obj["config"]
     app = create_app(config)
     uvicorn.run(app, host=host or config.admin_host, port=port or config.admin_port)
+
+
+# --------------------------------------------------------------------------
+# couples (nationwide love-hotel facility discovery -- job_prod_lovehotel_couples)
+# --------------------------------------------------------------------------
+
+@main.group()
+def couples() -> None:
+    """カップルズ (couples.jp) nationwide facility discovery -- dry-run only,
+    NEVER writes to any database/fetch_queue. See docs/lovehotel_couples_db.md.
+    """
+
+
+@couples.command("discover-dry-run")
+@click.option(
+    "--index-url", "index_urls", multiple=True, default=("https://couples.jp/",), show_default=True,
+    help="Top-level page(s) to search for the 47 prefectures' navigation entry links.",
+)
+@click.option(
+    "--max-pages-per-prefecture", default=50, show_default=True,
+    help="Load-control budget (task requirement: 負荷を抑える) -- max pages crawled per prefecture.",
+)
+@click.option(
+    "--rate-limit", "rate_limit_seconds", default=5.0, show_default=True,
+    help="Seconds slept between HTTP requests -- matches config/jobs/prod_lovehotel_couples.yaml's rate_limit=5.0.",
+)
+@click.option("--user-agent", default=None, help="Defaults to the configured user_agent (config/default.yaml).")
+@click.option(
+    "--fixtures-dir", default=None, type=click.Path(exists=True, file_okay=False),
+    help="OFFLINE mode: serve HTML from local files (see discovery/lovehotel_couples.py::FixtureFetchEngine) "
+         "instead of the live network -- for environments with no outbound access to couples.jp, or for "
+         "reproducible tests. The report is clearly marked SIMULATED in this mode.",
+)
+@click.option(
+    "--output-dir", default=None, type=click.Path(),
+    help="Where to write the report (.txt) and detail (.json) files. Default: <home_dir>/discovery_dryrun/.",
+)
+@click.pass_context
+def couples_discover_dry_run(
+    ctx: click.Context,
+    index_urls: tuple[str, ...],
+    max_pages_per_prefecture: int,
+    rate_limit_seconds: float,
+    user_agent: str | None,
+    fixtures_dir: str | None,
+    output_dir: str | None,
+) -> None:
+    """Discover every real facility URL (couples.jp/hotel-details/{id})
+    reachable from the 47 prefectures' navigation entry points, WITHOUT
+    writing to any database or fetch_queue and WITHOUT enabling/resuming
+    job_prod_lovehotel_couples -- pure read-only verification before Phase 1
+    collection is ever allowed to run for real. Respects robots.txt (the
+    same `FetchEngine` every other job already uses) unless --fixtures-dir
+    is given, in which case no live HTTP happens at all.
+    """
+    config: AppConfig = ctx.obj["config"]
+
+    if fixtures_dir:
+        fetch_engine = FixtureFetchEngine(fixtures_dir)
+        simulated = True
+        effective_rate_limit = 0.0  # no real network -- rate limiting is meaningless
+    else:
+        fetch_engine = FetchEngine(user_agent=user_agent or config.user_agent, respect_robots=True)
+        simulated = False
+        effective_rate_limit = rate_limit_seconds
+
+    result = discover_all_prefectures(
+        fetch_engine,
+        index_urls=list(index_urls),
+        max_pages_per_prefecture=max_pages_per_prefecture,
+        rate_limit_seconds=effective_rate_limit,
+    )
+
+    report = format_dry_run_report(result, simulated=simulated)
+    click.echo(report)
+
+    out_dir = Path(output_dir) if output_dir else config.home_dir / "discovery_dryrun"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_path = out_dir / f"couples_nationwide_{stamp}.txt"
+    json_path = out_dir / f"couples_nationwide_{stamp}.json"
+    report_path.write_text(report, encoding="utf-8")
+    json_path.write_text(json.dumps(to_json_summary(result), indent=2, ensure_ascii=False), encoding="utf-8")
+
+    click.echo(f"report written to: {report_path}")
+    click.echo(f"detail json written to: {json_path}")
+    sys.exit(0 if not result.failed_prefectures else 1)
 
 
 if __name__ == "__main__":
