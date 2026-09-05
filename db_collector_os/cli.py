@@ -436,8 +436,14 @@ def couples() -> None:
     help="Top-level page(s) to search for the 47 prefectures' navigation entry links.",
 )
 @click.option(
-    "--max-pages-per-prefecture", default=50, show_default=True,
-    help="Load-control budget (task requirement: 負荷を抑える) -- max pages crawled per prefecture.",
+    "--max-pages-per-prefecture", default=150, show_default=True,
+    help="Load-control budget (task requirement: 負荷を抑える) -- max pages crawled per prefecture. "
+         "150 allows several area/city/pagination hops per prefecture (see "
+         "test_bfs_walks_area_city_search_and_pagination_hops_not_just_the_first_link) without "
+         "being unbounded; raise it once real per-prefecture page counts are observed on a live run "
+         "if a large prefecture (e.g. Tokyo/Osaka) is being truncated -- pages_visited reaching this "
+         "budget exactly, with facilities still increasing, is the signal to raise it, not a lower "
+         "count alone (see PrefectureDiscoveryResult.pages_visited in the JSON detail output).",
 )
 @click.option(
     "--rate-limit", "rate_limit_seconds", default=5.0, show_default=True,

@@ -447,3 +447,112 @@ def test_module_does_not_touch_other_categories():
 
     figure_adapter = get_adapter("figure_official_site")
     assert figure_adapter.entity_type != "love_hotel"
+
+
+# ---------------------------------------------------------------------------
+# Deep multi-hop navigation audit: prefecture entry -> area -> city ->
+# paginated search-result pages -> facility links. A shallow implementation
+# that only ever looks one hop past the prefecture entry point would
+# silently undercount real prefectures (which conventionally nest area/city/
+# search-result pages several links deep) while still reporting a "clean"
+# 47/47-visited run -- this proves the BFS genuinely walks the full tree,
+# not just the first hop, before that number is trusted.
+# ---------------------------------------------------------------------------
+
+
+def _write_html(tmp_path, name: str, content: str) -> str:
+    (tmp_path / name).write_text(content, encoding="utf-8")
+    return name
+
+
+def _build_deep_multi_hop_fixture(tmp_path):
+    """東京都: entry -> 2 area pages -> each area -> 2 city pages -> each
+    city -> a 2-page paginated search-result listing -> facility links.
+    2 areas * 2 cities * 2 pages * 2 facilities/page = 16 distinct
+    facilities, reachable only by walking all 4 hops."""
+    manifest: dict[str, str] = {}
+
+    manifest["https://couples.jp/prefectures/13"] = _write_html(
+        tmp_path, "tokyo_entry.html",
+        """<html><body>
+        <a href="https://couples.jp/areas/13/east">東部エリア</a>
+        <a href="https://couples.jp/areas/13/west">西部エリア</a>
+        </body></html>""",
+    )
+
+    facility_id = 20000
+    for area in ("east", "west"):
+        manifest[f"https://couples.jp/areas/13/{area}"] = _write_html(
+            tmp_path, f"area_{area}.html",
+            f"""<html><body>
+            <a href="https://couples.jp/cities/13/{area}/city1">市区町村1</a>
+            <a href="https://couples.jp/cities/13/{area}/city2">市区町村2</a>
+            </body></html>""",
+        )
+        for city in ("city1", "city2"):
+            manifest[f"https://couples.jp/cities/13/{area}/{city}"] = _write_html(
+                tmp_path, f"city_{area}_{city}.html",
+                f'<html><body><a href="https://couples.jp/search?area={area}&city={city}&page=1">検索結果</a></body></html>',
+            )
+            for page in (1, 2):
+                links = []
+                for _ in range(2):
+                    facility_id += 1
+                    links.append(f'<a href="https://couples.jp/hotel-details/{facility_id}">H{facility_id}</a>')
+                next_link = (
+                    f'<a href="https://couples.jp/search?area={area}&city={city}&page={page + 1}">次へ</a>'
+                    if page == 1 else ""
+                )
+                html = f"<html><body>{''.join(links)}{next_link}</body></html>"
+                manifest[f"https://couples.jp/search?area={area}&city={city}&page={page}"] = _write_html(
+                    tmp_path, f"search_{area}_{city}_p{page}.html", html,
+                )
+
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    return FixtureFetchEngine(tmp_path), manifest
+
+
+def test_bfs_walks_area_city_search_and_pagination_hops_not_just_the_first_link():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        from pathlib import Path as _Path
+
+        fetcher, manifest = _build_deep_multi_hop_fixture(_Path(td))
+        result = discover_prefecture_facilities(
+            "東京都", "https://couples.jp/prefectures/13", fetcher, max_pages=100,
+        )
+
+    assert result.status == "ok"
+    # 1 entry + 2 area + 4 city + 8 search-result pages = 15 pages, all of
+    # which must actually be fetched -- a shallow (1-hop) implementation
+    # would stop at 1 or 3 pages and silently undercount.
+    assert result.pages_visited == 15
+    assert result.pages_failed == 0
+    assert len(result.unique_facility_ids) == 16
+    assert all(f.prefecture == "東京都" for f in result.facilities)
+    # every discovered URL is the bare canonical form, nothing from a
+    # listing/search/area/city hop leaked into the facility result set:
+    assert all(is_couples_facility_url(f.canonical_url) for f in result.facilities)
+    assert all(f.canonical_url == f"https://couples.jp/hotel-details/{f.facility_id}" for f in result.facilities)
+
+
+def test_bfs_does_not_undercount_when_max_pages_is_generous_enough_for_the_real_tree():
+    """A max_pages budget lower than the tree's real page count DOES
+    legitimately truncate discovery (load control is a deliberate design
+    choice, task requirement 負荷を抑える) -- but the report must never
+    silently claim "ok" success while having skipped part of a reachable
+    tree without it being reflected in a lower pages_visited/facility count
+    than the generous-budget run. This pins that relationship down."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        from pathlib import Path as _Path
+
+        fetcher, _manifest = _build_deep_multi_hop_fixture(_Path(td))
+        truncated = discover_prefecture_facilities(
+            "東京都", "https://couples.jp/prefectures/13", fetcher, max_pages=5,
+        )
+
+    assert truncated.pages_visited == 5
+    assert len(truncated.unique_facility_ids) < 16  # budget-limited, honestly reflected
