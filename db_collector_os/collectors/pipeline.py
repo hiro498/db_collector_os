@@ -19,6 +19,7 @@ from ..extraction.common import extract_common
 from ..fetching.urlnorm import extract_domain
 from ..models.enums import CandidateStatus, JobPhase, ReviewReason, RunStatus
 from ..normalization import normalize_address, normalize_name, normalize_telephone, normalize_url
+from ..persistence import PersistenceService
 from .context import CollectorContext
 from .phase_manager import PhaseSignals, phase1_conditions_met
 
@@ -327,61 +328,130 @@ class BaseCollector:
         ctx = self.ctx
         job_id = job["job_id"]
 
-        if record.skip:
-            # Confirmed non-entity page (category/listing/nav/...): drop it
-            # quietly rather than sending it to review -- it was never a
-            # candidate entity in the first place.
-            if candidate:
-                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.REJECTED)
-            return
-
-        if record.missing_required:
-            ctx.review.add(
-                job_id, ReviewReason.MISSING_REQUIRED_FIELD,
-                details=f"missing: {record.missing_required}", candidate_id=candidate["candidate_id"] if candidate else None,
-            )
-            if candidate:
-                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.REVIEW)
-            outcome.reviewed += 1
-            return
-
-        normalized_name = normalize_name(record.name)
-        address = normalize_address(record.address) if record.address else None
-        telephone = normalize_telephone(record.telephone) if record.telephone else None
-        canonical_url = normalize_url(record.canonical_url or source_url)
-
-        decision = ctx.dedup.resolve(
-            job_id, record.entity_type or job["collector_type"], name=record.name,
-            normalized_name=normalized_name, canonical_url=canonical_url, domain=domain,
-            address=address, telephone=telephone, external_id=record.external_id,
+        persistence = PersistenceService(
+            entities=ctx.entities,
+            evidence=ctx.evidence,
+            dedup=ctx.dedup,
         )
 
-        if decision.action == "new":
-            entity_id = ctx.entities.create(
-                job_id=job_id, entity_type=record.entity_type or job["collector_type"], name=record.name,
-                normalized_name=normalized_name, canonical_url=canonical_url, domain=domain,
-                address=address, telephone=telephone, external_id=record.external_id,
-                fingerprint=decision.fingerprint, data=record.fields,
-            )
-            ctx.evidence.record_many(entity_id, {**record.fields, "name": record.name}, source_url, record.confidence)
-            outcome.inserted += 1
+        result = persistence.persist(
+            job_id=job_id,
+            record=record,
+            source_url=source_url,
+            domain=domain,
+            default_entity_type=job["collector_type"],
+        )
+
+        if result.action == "skip":
             if candidate:
-                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.ACCEPTED)
-        elif decision.action == "merge":
-            ctx.entities.merge_data(decision.entity_id, record.fields)
-            ctx.evidence.record_many(decision.entity_id, {**record.fields, "name": record.name}, source_url, record.confidence)
+                ctx.candidates.set_status(
+                    candidate["candidate_id"],
+                    CandidateStatus.REJECTED,
+                )
+            return
+
+        if result.action == "invalid":
+            missing = [
+                error.split(":", 1)[1]
+                for error in result.errors
+                if error.startswith("missing_required:")
+            ]
+
+            reason = (
+                ReviewReason.MISSING_REQUIRED_FIELD
+                if missing
+                else ReviewReason.PARSE_FAILURE
+            )
+
+            details = (
+                f"missing: {missing}"
+                if missing
+                else "record validation failed: " + "; ".join(result.errors)
+            )
+
+            ctx.review.add(
+                job_id,
+                reason,
+                details=details,
+                candidate_id=(
+                    candidate["candidate_id"]
+                    if candidate
+                    else None
+                ),
+            )
+
+            if candidate:
+                ctx.candidates.set_status(
+                    candidate["candidate_id"],
+                    CandidateStatus.REVIEW,
+                )
+
+            outcome.reviewed += 1
+            return
+
+        if result.action == "inserted":
+            outcome.inserted += 1
+
+            if candidate:
+                ctx.candidates.set_status(
+                    candidate["candidate_id"],
+                    CandidateStatus.ACCEPTED,
+                )
+
+            return
+
+        if result.action == "updated":
             outcome.updated += 1
             outcome.duplicates += 1
+
             if candidate:
-                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.DUPLICATE)
-        else:  # review
+                ctx.candidates.set_status(
+                    candidate["candidate_id"],
+                    CandidateStatus.DUPLICATE,
+                )
+
+            return
+
+        if result.action == "review":
             ctx.review.add(
-                job_id, ReviewReason.DUPLICATE_AMBIGUITY, details=decision.reason,
-                entity_id=decision.entity_id, candidate_id=candidate["candidate_id"] if candidate else None,
+                job_id,
+                ReviewReason.DUPLICATE_AMBIGUITY,
+                details=result.reason,
+                entity_id=result.entity_id,
+                candidate_id=(
+                    candidate["candidate_id"]
+                    if candidate
+                    else None
+                ),
             )
+
             if candidate:
-                ctx.candidates.set_status(candidate["candidate_id"], CandidateStatus.REVIEW)
+                ctx.candidates.set_status(
+                    candidate["candidate_id"],
+                    CandidateStatus.REVIEW,
+                )
+
             outcome.reviewed += 1
+            return
+
+        ctx.review.add(
+            job_id,
+            ReviewReason.PARSE_FAILURE,
+            details=f"unknown persistence action: {result.action}",
+            candidate_id=(
+                candidate["candidate_id"]
+                if candidate
+                else None
+            ),
+        )
+
+        if candidate:
+            ctx.candidates.set_status(
+                candidate["candidate_id"],
+                CandidateStatus.REVIEW,
+            )
+
+        outcome.reviewed += 1
 
     def _advance_phase(self, job: dict[str, Any], state: dict[str, Any]) -> str:
         from ..discovery.saturation import SaturationConfig, is_saturated
