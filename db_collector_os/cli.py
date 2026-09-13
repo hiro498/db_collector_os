@@ -43,6 +43,7 @@ from .review import ReviewQueue
 from .run_history import RunHistoryStore
 from .scheduler import Scheduler
 from .worker import Worker, run_job_and_record
+from .competitive_intelligence.cli import ci as competitive_intelligence_cli
 
 
 @click.group()
@@ -409,6 +410,11 @@ def admin_serve(ctx: click.Context, host: str | None, port: int | None) -> None:
     config: AppConfig = ctx.obj["config"]
     app = create_app(config)
     uvicorn.run(app, host=host or config.admin_host, port=port or config.admin_port)
+
+
+# Competitive Keyword / Content Discovery Engine -- additive only; does not
+# alter any command above (see competitive_intelligence/cli.py).
+main.add_command(competitive_intelligence_cli)
 
 
 if __name__ == "__main__":

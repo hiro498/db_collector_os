@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ keyword.keyword }} - KW詳細{% endblock %}
+{% block content %}
+<h1>{{ keyword.keyword }}</h1>
+<p><a href="/runs/{{ run_id }}/keywords">&larr; KW一覧に戻る</a></p>
+
+<div class="cards">
+<div class="card"><div class="value">{{ page_keywords[0].score if page_keywords else "-" }}</div><div class="label">Score (best)</div></div>
+<div class="card"><div class="value">{{ page_keywords[0].importance if page_keywords else "-" }}</div><div class="label">Importance</div></div>
+<div class="card"><div class="value">{{ page_keywords[0].intent if page_keywords else "-" }}</div><div class="label">Intent</div></div>
+<div class="card"><div class="value">{{ page_keywords[0].commercial_score if page_keywords else "-" }}</div><div class="label">Commercial Score</div></div>
+<div class="card"><div class="value">{{ cluster.label if cluster else "-" }}</div><div class="label">Cluster</div></div>
+</div>
+
+<h2>スコア内訳（最高スコアページ）</h2>
+{% if page_keywords %}
+{% set best = page_keywords[0] %}
+<table>
+<thead><tr>
+<th>HTML Score</th><th>Content Score</th><th>Phrase Score</th><th>Site Structure Score</th>
+<th>Intent Score</th><th>Cross Page Score</th><th>Rule Boost</th>
+</tr></thead>
+<tbody><tr>
+<td>{{ best.html_score }}</td><td>{{ best.content_score }}</td><td>{{ best.phrase_score }}</td>
+<td>{{ best.site_structure_score }}</td><td>{{ best.intent_score }}</td><td>{{ best.cross_page_score }}</td>
+<td>{{ best.rule_boost }} <span class="muted">{{ best.rule_boost_reasons_json }}</span></td>
+</tr></tbody>
+</table>
+
+<h2>根拠</h2>
+<table>
+<thead><tr><th>title hit</th><th>H1 hit</th><th>H2 count</th><th>H3 count</th><th>body count</th><th>anchor count</th></tr></thead>
+<tbody><tr>
+<td>{{ "yes" if best.title_hit else "no" }}</td><td>{{ "yes" if best.h1_hit else "no" }}</td>
+<td>{{ best.h2_count }}</td><td>{{ best.h3_count }}</td><td>{{ best.body_count }}</td><td>{{ best.anchor_count }}</td>
+</tr></tbody>
+</table>
+{% endif %}
+
+<h2>このKWを狙っているページ一覧</h2>
+<table>
+<thead><tr><th>URL</th><th>Title</th><th>Page Type</th><th>Score</th><th>Importance</th><th>Primary</th></tr></thead>
+<tbody>
+{% for pk in page_keywords %}
+<tr>
+<td><a href="{{ pk.url }}" target="_blank" rel="noopener">{{ pk.url }}</a></td>
+<td>{{ pk.title or "-" }}</td>
+<td>{{ pk.page_type }}</td>
+<td>{{ pk.score }}</td>
+<td><span class="badge importance-{{ pk.importance }}">{{ pk.importance }}</span></td>
+<td>{{ "yes" if pk.is_primary else "" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">ページがありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

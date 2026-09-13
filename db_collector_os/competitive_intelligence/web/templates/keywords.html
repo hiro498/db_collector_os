@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}KW一覧 - {{ run_id }}{% endblock %}
+{% block content %}
+<h1>KW一覧</h1>
+<p><a href="/runs/{{ run_id }}">&larr; 実行状況に戻る</a></p>
+
+<form class="filters" method="get">
+    <input type="text" name="q" placeholder="キーワード検索" value="{{ q }}">
+    <select name="importance">
+        <option value="">Importance: 全て</option>
+        {% for i in ["primary","secondary","related","supporting","noise"] %}
+        <option value="{{ i }}" {% if importance == i %}selected{% endif %}>{{ i }}</option>
+        {% endfor %}
+    </select>
+    <select name="intent_group">
+        <option value="">Intent: 全て</option>
+        {% for g in ["Know","Do","Buy","Go"] %}
+        <option value="{{ g }}" {% if intent_group == g %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+    </select>
+    <input type="number" name="min_commercial_score" placeholder="Commercial Score >=" value="{{ min_commercial_score or '' }}" style="width:10rem;">
+    <select name="branded_type">
+        <option value="">Branded: 全て</option>
+        <option value="branded" {% if branded_type == "branded" %}selected{% endif %}>Branded</option>
+        <option value="non_branded" {% if branded_type == "non_branded" %}selected{% endif %}>Non-Branded</option>
+        <option value="mixed" {% if branded_type == "mixed" %}selected{% endif %}>Mixed</option>
+    </select>
+    <select name="is_local">
+        <option value="">Local: 全て</option>
+        <option value="1" {% if is_local == "1" %}selected{% endif %}>Local</option>
+        <option value="0" {% if is_local == "0" %}selected{% endif %}>Non-Local</option>
+    </select>
+    <select name="keyword_class">
+        <option value="">KW Class: 全て</option>
+        <option value="head" {% if keyword_class == "head" %}selected{% endif %}>Head</option>
+        <option value="middle" {% if keyword_class == "middle" %}selected{% endif %}>Middle</option>
+        <option value="long_tail" {% if keyword_class == "long_tail" %}selected{% endif %}>Long Tail</option>
+    </select>
+    <button type="submit">絞り込み</button>
+</form>
+
+<table>
+<thead><tr>
+<th>KW</th><th>Score</th><th>Importance</th><th>Intent</th><th>Commercial Score</th><th>使用ページ数</th><th>Cluster</th>
+</tr></thead>
+<tbody>
+{% for k in keywords %}
+<tr>
+<td><a href="/runs/{{ run_id }}/keywords/{{ k.keyword_id }}">{{ k.keyword }}</a></td>
+<td>{{ k.score }}</td>
+<td><span class="badge importance-{{ k.importance }}">{{ k.importance }}</span></td>
+<td>{{ k.intent }}</td>
+<td>{{ k.commercial_score }}</td>
+<td>{{ k.page_count }}</td>
+<td class="muted">{{ k.cluster or "-" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="muted">キーワードがありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="pagination">
+{% if offset > 0 %}<a class="btn secondary" href="?offset={{ offset - page_size }}&q={{ q }}">&larr; Prev</a>{% endif %}
+{% if keywords|length == page_size %}<a class="btn secondary" href="?offset={{ offset + page_size }}&q={{ q }}">Next &rarr;</a>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}Competitive Keyword Discovery{% endblock %}</title>
+    <style>
+        :root { color-scheme: light dark; }
+        body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
+        header { background: #1e2a3a; color: #fff; padding: 0.75rem 1.5rem; display: flex; gap: 1.5rem; align-items: center; }
+        header a { color: #cfe0ff; text-decoration: none; font-size: 0.95rem; }
+        header a:hover { color: #fff; }
+        header .brand { font-weight: 700; font-size: 1.02rem; color: #fff; }
+        main { padding: 1.5rem; max-width: 1300px; margin: 0 auto; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .card { background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .card .value { font-size: 1.5rem; font-weight: 700; }
+        .card .label { font-size: 0.78rem; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid #eee; font-size: 0.86rem; }
+        th { background: #eef0f5; font-weight: 600; }
+        tr:last-child td { border-bottom: none; }
+        h1, h2 { font-weight: 600; }
+        h1 { font-size: 1.35rem; }
+        h2 { font-size: 1.05rem; margin-top: 1.75rem; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.76rem; background: #eee; }
+        .badge.status-running { background: #dbeafe; color: #1e40af; }
+        .badge.status-completed { background: #dcfce7; color: #166534; }
+        .badge.status-failed { background: #fee2e2; color: #991b1b; }
+        .badge.status-stopped { background: #fef9c3; color: #854d0e; }
+        .badge.importance-primary { background: #fee2e2; color: #991b1b; }
+        .badge.importance-secondary { background: #ffedd5; color: #9a3412; }
+        .badge.importance-related { background: #dbeafe; color: #1e40af; }
+        .badge.importance-supporting, .badge.importance-noise { background: #f3f4f6; color: #4b5563; }
+        form.inline { display: inline; }
+        form.filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; align-items: center; }
+        form.filters select, form.filters input { padding: 0.3rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+        button, .btn { cursor: pointer; border: none; background: #1e2a3a; color: #fff; padding: 0.35rem 0.8rem; border-radius: 4px; font-size: 0.85rem; text-decoration: none; display: inline-block; }
+        button:hover, .btn:hover { background: #10182a; }
+        .btn.secondary { background: #6b7280; }
+        .pagination { margin-top: 1rem; display: flex; gap: 1rem; }
+        .muted { color: #888; font-size: 0.85rem; }
+        code { background: #eef0f5; padding: 0.1rem 0.3rem; border-radius: 3px; }
+    </style>
+</head>
+<body>
+<header>
+    <span class="brand">Competitive Keyword Discovery</span>
+    <a href="/">調査一覧</a>
+    <a href="/new">新規調査</a>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

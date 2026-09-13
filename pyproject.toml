@@ -20,6 +20,9 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "jinja2>=3.1",
+    # Required by FastAPI's Form(...) parsing, used by the Competitive
+    # Keyword / Content Discovery Engine's "new investigation" form.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +30,16 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "responses>=0.25",
+    "httpx>=0.27",
+]
+# Competitive Keyword / Content Discovery Engine's Japanese morphological
+# analysis (see competitive_intelligence/keyword/tokenizer.py). Optional so
+# the existing entity-collection install path never pulls in Sudachi's
+# dictionary; a regex-based fallback tokenizer is used when this extra
+# isn't installed.
+ci = [
+    "sudachipy>=0.6",
+    "sudachidict_core>=20240109",
 ]
 
 [project.scripts]

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}調査一覧 - Competitive Keyword Discovery{% endblock %}
+{% block content %}
+<h1>調査一覧</h1>
+<p><a class="btn" href="/new">+ 新規調査</a></p>
+<table>
+<thead><tr>
+<th>Domain / URL</th><th>Target Type</th><th>Vertical</th><th>Status</th>
+<th>発見URL</th><th>分析ページ</th><th>Progress</th><th>最終実行</th>
+</tr></thead>
+<tbody>
+{% for run in runs %}
+<tr>
+<td><a href="/runs/{{ run.crawl_run_id }}">{{ run.domain }}</a><br><span class="muted">{{ run.input_url }}</span></td>
+<td>{{ run.input_mode }}</td>
+<td>{{ run.vertical }}</td>
+<td><span class="badge status-{{ run.status }}">{{ run.status }}</span>{% if run.converged %} <span class="badge status-completed">converged</span>{% endif %}</td>
+<td>{{ run.discovered_total }}</td>
+<td>{{ run.analyzed_pages }}</td>
+<td>{{ (run.completion_rate * 100) | round(1) }}%</td>
+<td>{{ run.started_at }}</td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">まだ調査がありません。「新規調査」から開始してください。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

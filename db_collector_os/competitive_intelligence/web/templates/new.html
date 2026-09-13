@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}新規調査 - Competitive Keyword Discovery{% endblock %}
+{% block content %}
+<h1>新規調査</h1>
+<form method="post" action="/new" class="filters" style="flex-direction: column; align-items: stretch; max-width: 480px;">
+    <label>URL<br><input type="url" name="url" required style="width: 100%; padding: 0.4rem;"></label>
+    <label>Target Type<br>
+        <select name="mode">
+            <option value="auto">Auto</option>
+            <option value="affiliate_domain">Affiliate Domain</option>
+            <option value="advertiser_lp">Advertiser LP</option>
+        </select>
+    </label>
+    <label>Vertical<br>
+        <select name="vertical">
+            <option value="general">General</option>
+        </select>
+        <span class="muted">(後から追加可能な構造)</span>
+    </label>
+    <p><button type="submit">調査開始</button></p>
+</form>
+<p class="muted">
+Affiliate Domain: 同一ドメインの全HTMLページを新規URL=0になるまでクロールします（ページ数上限なし）。<br>
+Advertiser LP: 指定ページのみを解析します（ドメイン全体はクロールしません）。
+</p>
+{% endblock %}

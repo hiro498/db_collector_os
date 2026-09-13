@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}実行状況 - {{ run.domain if run.domain is defined else run_id }}{% endblock %}
+{% block content %}
+<h1>実行状況: {{ run.input_url }}</h1>
+<p>
+<span class="badge status-{{ run.status }}">{{ run.status }}</span>
+{% if run.converged %}<span class="badge status-completed">converged</span>{% endif %}
+mode={{ run.input_mode }} (requested: {{ run.requested_mode }}) / vertical={{ run.vertical }}
+</p>
+
+<div class="cards">
+<div class="card"><div class="value">{{ run.discovered_total }}</div><div class="label">発見数</div></div>
+<div class="card"><div class="value">{{ run.fetched_success }}</div><div class="label">取得数</div></div>
+<div class="card"><div class="value">{{ run.analyzed_pages }}</div><div class="label">解析数</div></div>
+<div class="card"><div class="value">{{ run.excluded_count }}</div><div class="label">除外数</div></div>
+<div class="card"><div class="value">{{ crawl_url_status_counts.get('discovered', 0) + crawl_url_status_counts.get('queued', 0) }}</div><div class="label">待機数</div></div>
+<div class="card"><div class="value">{{ run.count_retry_failed }}</div><div class="label">失敗数</div></div>
+<div class="card"><div class="value">{{ (run.completion_rate * 100) | round(1) }}%</div><div class="label">Progress</div></div>
+<div class="card"><div class="value">{{ "yes" if run.converged else "no" }}</div><div class="label">Converged</div></div>
+</div>
+
+<p>
+<a class="btn" href="/runs/{{ run_id }}/audit">クロール監査</a>
+<a class="btn" href="/runs/{{ run_id }}/pages">ページ一覧</a>
+<a class="btn" href="/runs/{{ run_id }}/keywords">KW一覧</a>
+</p>
+
+<h2>操作</h2>
+<p>
+<form class="inline" method="post" action="/runs/{{ run_id }}/resume"><button>再開</button></form>
+<form class="inline" method="post" action="/runs/{{ run_id }}/stop"><button class="secondary">停止要求</button></form>
+<form class="inline" method="post" action="/runs/{{ run_id }}/reanalyze"><button class="secondary">再解析</button></form>
+<form class="inline" method="post" action="/runs/{{ run_id }}/recompute-keywords"><button class="secondary">KW再計算</button></form>
+</p>
+<h2>CSV Export</h2>
+<p>
+{% for f in ["domain_summary.csv", "pages.csv", "keywords.csv", "page_keywords.csv", "crawl_audit.csv"] %}
+<a class="btn secondary" href="/runs/{{ run_id }}/export?file={{ f }}">{{ f }}</a>
+{% endfor %}
+</p>
+{% if run.error_message %}<p class="muted">note: {{ run.error_message }}</p>{% endif %}
+{% endblock %}

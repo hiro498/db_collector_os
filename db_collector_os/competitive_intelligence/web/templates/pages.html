@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}ページ一覧 - {{ run_id }}{% endblock %}
+{% block content %}
+<h1>ページ一覧</h1>
+<p><a href="/runs/{{ run_id }}">&larr; 実行状況に戻る</a></p>
+
+<form class="filters" method="get">
+    <input type="text" name="q" placeholder="URL / タイトル検索" value="{{ q }}">
+    <select name="page_type">
+        <option value="">全Page Type</option>
+        {% for t in ["top","article","ranking","comparison","review","product_service","category","tag","lp","company","contact","privacy","terms","login","utility","other"] %}
+        <option value="{{ t }}" {% if page_type == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <select name="analysis_target">
+        <option value="">SEO分析対象: 全て</option>
+        <option value="1" {% if analysis_target == "1" %}selected{% endif %}>対象のみ</option>
+        <option value="0" {% if analysis_target == "0" %}selected{% endif %}>対象外のみ</option>
+    </select>
+    <select name="indexable">
+        <option value="">INDEX/NOINDEX: 全て</option>
+        <option value="1" {% if indexable == "1" %}selected{% endif %}>INDEX</option>
+        <option value="0" {% if indexable == "0" %}selected{% endif %}>NOINDEX</option>
+    </select>
+    <select name="monetization_type">
+        <option value="">収益/情報: 全て</option>
+        <option value="commercial" {% if monetization_type == "commercial" %}selected{% endif %}>commercial</option>
+        <option value="mixed" {% if monetization_type == "mixed" %}selected{% endif %}>mixed</option>
+        <option value="informational" {% if monetization_type == "informational" %}selected{% endif %}>informational</option>
+    </select>
+    <input type="number" name="min_score" placeholder="Score >=" value="{{ min_score or '' }}" style="width:6rem;">
+    <button type="submit">絞り込み</button>
+</form>
+
+<table>
+<thead><tr>
+<th>URL</th><th>Page Type</th><th>Title</th><th>Primary KW</th><th>Score</th><th>Intent</th>
+<th>Monetization Score</th><th>更新日</th>
+</tr></thead>
+<tbody>
+{% for p in pages %}
+<tr>
+<td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url }}</a></td>
+<td>{{ p.page_type }} <span class="muted">({{ p.page_type_confidence }})</span></td>
+<td>{{ p.title or "-" }}</td>
+<td>{{ p.primary_keyword or "-" }}</td>
+<td>{{ p.primary_keyword_score if p.primary_keyword_score is not none else "-" }}</td>
+<td>{{ p.primary_keyword_intent or "-" }}</td>
+<td>{{ p.monetization_score }} ({{ p.monetization_type }})</td>
+<td>{{ p.updated_at_source or p.updated_at }}</td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">ページがありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="pagination">
+{% if offset > 0 %}<a class="btn secondary" href="?offset={{ offset - page_size }}&q={{ q }}&page_type={{ page_type or '' }}">&larr; Prev</a>{% endif %}
+{% if pages|length == page_size %}<a class="btn secondary" href="?offset={{ offset + page_size }}&q={{ q }}&page_type={{ page_type or '' }}">Next &rarr;</a>{% endif %}
+</div>
+{% endblock %}
