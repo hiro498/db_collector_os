@@ -124,19 +124,29 @@ class CrawlEngine:
             if not pending:
                 break
 
-            new_discovered = 0
             for crawl_url in pending:
                 if self.runs.is_stop_requested(crawl_run_id):
                     self._stop_safely(crawl_run_id)
                     return
-                new_discovered += self._process_one(crawl_run_id, crawl_url, host, single_page)
+                self._process_one(crawl_run_id, crawl_url, host, single_page)
 
             self.internal_links.resolve_targets(crawl_run_id)
             detect_and_mark_boilerplate(self.db, crawl_run_id)
             audit_mod.recompute_audit(self.db, crawl_run_id)
 
-            if single_page or new_discovered == 0:
-                break
+            # Convergence (spec section 12) means "every discovered URL has
+            # reached a terminal disposition" -- completed, excluded, or
+            # failed after exhausting its retries -- not merely "this round
+            # discovered nothing new". A URL that failed once and is still
+            # `queued` for retry (see _record_fetch_failure) is picked up
+            # again the next time through this loop, because it still shows
+            # up in `pending` at the top -- breaking here on some "no new
+            # URLs this round" condition would abandon it before
+            # MAX_FETCH_ATTEMPTS is ever reached. `single_page` needs no
+            # special case either: _process_one never calls
+            # _discover_from_page for it, so its one seed URL leaving
+            # QUEUED/DISCOVERED (success or exhausted retries) is exactly
+            # what makes `pending` empty at the top of the next pass.
 
         self._finalize(crawl_run_id, iterations)
 

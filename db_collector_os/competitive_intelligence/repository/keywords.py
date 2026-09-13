@@ -97,12 +97,14 @@ class KeywordRepository:
     def add_occurrence(
         self, page_keyword_id: str, element_type: str, occurrence_count: int,
         first_position: int | None, weight: float, evidence_text: str | None,
+        last_position: int | None = None,
     ) -> None:
         self.db.execute(
             "INSERT INTO ci_keyword_occurrences "
-            "(page_keyword_id, element_type, occurrence_count, first_position, weight, evidence_text) "
-            "VALUES (?,?,?,?,?,?)",
-            (page_keyword_id, element_type, occurrence_count, first_position, weight, evidence_text),
+            "(page_keyword_id, element_type, occurrence_count, first_position, last_position, weight, "
+            " evidence_text) VALUES (?,?,?,?,?,?,?)",
+            (page_keyword_id, element_type, occurrence_count, first_position,
+             last_position if last_position is not None else first_position, weight, evidence_text),
         )
 
     def list_occurrences(self, page_keyword_id: str) -> list[dict[str, Any]]:

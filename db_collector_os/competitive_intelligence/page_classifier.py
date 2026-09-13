@@ -94,6 +94,17 @@ def classify(
         scores[PageType.ARTICLE] += 10
     if cta_count >= 3 and len(body) < 400 and outbound_affiliate_ratio > 0.3:
         scores[PageType.LP] += 40
+    # A page with a real h1 and a substantive body, and no heavy-CTA/LP
+    # signal, is ordinary editorial content -- the common case for an
+    # affiliate site's articles, most of which carry no schema.org markup
+    # at all. Without this, any plain article with no JSON-LD/FAQ/ranking
+    # keyword would fall through to `other` below the commit threshold,
+    # even though "it's just an article" is the obviously correct read.
+    # This never outranks a more specific signal (top/ranking/comparison/
+    # review/company/... all score higher already) -- it only rescues the
+    # otherwise-signal-less case.
+    if len(body) > 150 and cta_count <= 2 and _first_text(elements, "h1"):
+        scores[PageType.ARTICLE] += 30
     if len(body) > 800 and cta_count == 0:
         scores[PageType.ARTICLE] += 10
 

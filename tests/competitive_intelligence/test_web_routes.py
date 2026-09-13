@@ -26,6 +26,17 @@ def test_top_and_new_pages_render(app_config, db):
     assert client.get("/new").status_code == 200
 
 
+def test_pages_view_includes_link_metrics_from_link_analyzer(app_config, db):
+    # Guards against link_analyzer.compute_link_metrics being orphaned
+    # code that's never actually called from the dashboard.
+    run_id = _build_run(db)
+    client = TestClient(create_ci_app(app_config))
+    resp = client.get(f"/runs/{run_id}/pages")
+    assert resp.status_code == 200
+    assert "In/Out Links" in resp.text
+    assert "TOP距離" in resp.text
+
+
 def test_run_status_audit_pages_keywords_render(app_config, db):
     run_id = _build_run(db)
     client = TestClient(create_ci_app(app_config))

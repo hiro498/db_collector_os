@@ -95,6 +95,9 @@ def create_ci_app(config: AppConfig) -> FastAPI:
             analysis_target=at_filter, q=q or None, indexable=idx_filter,
             monetization_type=monetization_type or None, min_score=min_score,
         )
+        link_metrics = service.get_link_metrics(config, run_id)
+        for page in pages:
+            page["link_metrics"] = link_metrics.get(page["page_id"], {})
         return templates.TemplateResponse(request, "pages.html", {
             "run_id": run_id, "pages": pages, "offset": offset, "page_size": PAGE_SIZE,
             "page_type": page_type, "analysis_target": analysis_target, "q": q or "",

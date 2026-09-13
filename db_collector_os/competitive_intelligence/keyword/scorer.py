@@ -11,13 +11,14 @@ capped score, which is what Importance is bucketed from).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from ..enums import Importance
 
 HTML_POSITION_WEIGHTS: dict[str, int] = {
     "title": 15, "h1": 12, "url_slug": 8, "breadcrumb": 6, "category": 6,
-    "tag": 5, "h2": 5, "h3": 3, "meta_description": 3,
+    "tag": 5, "h2": 5, "h3": 3, "meta_description": 3, "meta_keywords": 3,
 }
 DEFAULT_ELEMENT_WEIGHT = 2
 MAX_HTML_SCORE = 40
@@ -64,14 +65,49 @@ def compute_phrase_score(token_count: int) -> int:
     return min(MAX_PHRASE_SCORE, max(0, token_count - 1) * 4)
 
 
+_TFIDF_SCALE = 400.0  # calibrated so a handful of mentions of a rare term
+# in a short-to-medium body page saturates the 10-point tf-idf budget
+# without a single occurrence anywhere already maxing it out.
+LEAD_POSITION_CHAR_THRESHOLD = 200
+DISTRIBUTION_SPAN_RATIO_THRESHOLD = 0.3
+
+
 def compute_content_score(
-    occurrences_in_body: int, doc_freq: int, total_docs: int, appears_in_lead: bool
+    occurrences_in_body: int,
+    body_token_count: int,
+    doc_freq: int,
+    total_docs: int,
+    first_position: int | None,
+    last_position: int | None,
+    body_length_chars: int,
 ) -> int:
-    tf_component = min(12, occurrences_in_body * 3)
-    rarity = 1.0 - (doc_freq / total_docs) if total_docs > 0 else 0.0
-    idf_component = round(max(0.0, rarity) * 5)
-    lead_bonus = 3 if appears_in_lead else 0
-    return min(MAX_CONTENT_SCORE, tf_component + idf_component + lead_bonus)
+    """Smoothed TF-IDF (spec section 22) plus two positional bonuses:
+    an early ("本文冒頭") mention, and a mention repeated late enough in the
+    body to show the term is discussed throughout ("本文全体での分布"),
+    not just name-dropped once near the top.
+
+    - tf: term frequency normalized by the page's own content-word count,
+      so a term repeated in a short page scores the same as one repeated
+      proportionally as often in a long page.
+    - idf: standard smoothed inverse document frequency,
+      ln((N+1)/(df+1)) + 1, over every analyzed page in this crawl_run.
+    """
+    tf = occurrences_in_body / body_token_count if body_token_count > 0 else 0.0
+    idf = math.log((total_docs + 1) / (doc_freq + 1)) + 1.0 if total_docs > 0 else 1.0
+    tfidf_component = min(10, round(tf * idf * _TFIDF_SCALE))
+
+    appears_in_lead = first_position is not None and first_position < LEAD_POSITION_CHAR_THRESHOLD
+    lead_bonus = 4 if appears_in_lead else 0
+
+    distribution_bonus = 0
+    if body_length_chars > 0 and first_position is not None and last_position is not None:
+        span_ratio = (last_position - first_position) / body_length_chars
+        if span_ratio >= DISTRIBUTION_SPAN_RATIO_THRESHOLD:
+            distribution_bonus = 6
+        elif occurrences_in_body >= 2:
+            distribution_bonus = 3
+
+    return min(MAX_CONTENT_SCORE, tfidf_component + lead_bonus + distribution_bonus)
 
 
 def compute_site_structure_score(page_count_in_run: int) -> int:

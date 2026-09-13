@@ -14,7 +14,7 @@ from typing import Any
 from ...database import Database
 from ..enums import PageType
 from ..repository.keywords import KeywordClusterRepository, KeywordRepository
-from ..repository.pages import PageRepository
+from ..repository.pages import PageElementRepository, PageRepository
 from ..repository.site import SiteProfileRepository
 from ..vertical.base import VerticalProfile, get_vertical
 from . import cluster as cluster_mod
@@ -25,11 +25,13 @@ from .candidate import generate_candidates
 from .normalizer import classify_branded, classify_keyword_class, detect_locality, normalize_keyword
 from .tokenizer import get_default_tokenizer
 
-# Elements re-scanned for keyword candidates. body_lead is a display-only
-# duplicate of the start of `body` (see parser/html_parser.py) and is
-# deliberately excluded here so its keywords aren't double-counted.
+# Elements re-scanned for keyword candidates (spec section 20: title/meta/
+# H1-H6/slug/breadcrumb/category/tag/anchor/body/CTA/FAQ/table and friends).
+# body_lead is a display-only duplicate of the start of `body` (see
+# parser/html_parser.py) and is deliberately excluded here so its keywords
+# aren't double-counted against `body`'s own occurrences.
 _SCANNED_ELEMENT_TYPES = (
-    "title", "meta_description", "h1", "h2", "h3", "h4", "h5", "h6", "url_slug",
+    "title", "meta_description", "meta_keywords", "h1", "h2", "h3", "h4", "h5", "h6", "url_slug",
     "breadcrumb", "category", "tag", "strong", "anchor", "alt", "caption",
     "table", "faq", "cta", "button", "body",
     "sidebar", "related_articles_heading", "popular_articles_heading", "ranking_heading",
@@ -38,7 +40,13 @@ _SCANNED_ELEMENT_TYPES = (
 
 def extract_page_candidates(elements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """normalized_keyword -> {raw_keyword, token_count,
-    occurrences: {element_type: {count, first_position, evidence_text}}}"""
+    occurrences: {element_type: {count, first_position, last_position, evidence_text}}}
+
+    `first_position`/`last_position` are character offsets within that
+    element_type's (typically single) text -- used by keyword.scorer to
+    reward both an early mention (spec section 22 "本文冒頭") and a mention
+    repeated later in the body (section 22 "本文全体での分布").
+    """
     tokenizer = get_default_tokenizer()
     aggregated: dict[str, dict[str, Any]] = {}
     for element in elements:
@@ -56,11 +64,29 @@ def extract_page_candidates(elements: list[dict[str, Any]]) -> dict[str, dict[st
                 "raw_keyword": cand.text, "token_count": cand.token_count, "occurrences": {},
             })
             occ = entry["occurrences"].setdefault(
-                element_type, {"count": 0, "first_position": cand.start_offset, "evidence_text": text[:120]}
+                element_type,
+                {"count": 0, "first_position": cand.start_offset, "last_position": cand.start_offset,
+                 "evidence_text": text[:120]},
             )
             occ["count"] += 1
             occ["first_position"] = min(occ["first_position"], cand.start_offset)
+            occ["last_position"] = max(occ["last_position"], cand.start_offset)
     return aggregated
+
+
+def _body_stats(elements: list[dict[str, Any]]) -> tuple[int, int]:
+    """(content_token_count, char_length) of the page's `body` element,
+    used for TF normalization and distribution-span ratios in
+    keyword.scorer.compute_content_score. Recomputed from stored text
+    (never persisted) so REANALYZE/KW再計算 can change the tokenizer or
+    formula without a re-crawl.
+    """
+    body_text = next((e.get("text") or "" for e in elements if e["element_type"] == "body"), "")
+    if not body_text:
+        return 0, 0
+    tokenizer = get_default_tokenizer()
+    content_tokens = sum(1 for m in tokenizer.tokenize(body_text) if m.is_content)
+    return content_tokens, len(body_text)
 
 
 def score_and_store_page(
@@ -122,7 +148,8 @@ def score_and_store_page(
         for element_type, occ in occurrences.items():
             weight = scorer.HTML_POSITION_WEIGHTS.get(element_type, scorer.DEFAULT_ELEMENT_WEIGHT)
             keyword_repo.add_occurrence(
-                page_keyword_id, element_type, occ["count"], occ["first_position"], weight, occ["evidence_text"]
+                page_keyword_id, element_type, occ["count"], occ["first_position"], weight, occ["evidence_text"],
+                last_position=occ["last_position"],
             )
         keyword_repo.add_modifiers(page_keyword_id, modifiers)
 
@@ -133,6 +160,7 @@ def finalize_run(db: Database, crawl_run_id: str) -> None:
     keyword_repo = KeywordRepository(db)
     cluster_repo = KeywordClusterRepository(db)
     page_repo = PageRepository(db)
+    element_repo = PageElementRepository(db)
 
     total_docs = page_repo.analyzed_count_for_run(crawl_run_id)
     page_keywords = db.query(
@@ -143,6 +171,15 @@ def finalize_run(db: Database, crawl_run_id: str) -> None:
     by_keyword: dict[str, list[dict]] = {}
     for row in page_keywords:
         by_keyword.setdefault(row["keyword_id"], []).append(row)
+
+    # Cached once per page (not per keyword) -- re-tokenizing the body for
+    # every keyword on a page would be O(keywords x tokens) for no reason.
+    body_stats_by_page: dict[str, tuple[int, int]] = {}
+
+    def body_stats(page_id: str) -> tuple[int, int]:
+        if page_id not in body_stats_by_page:
+            body_stats_by_page[page_id] = _body_stats(element_repo.list_for_page(page_id))
+        return body_stats_by_page[page_id]
 
     category_tag_pages = db.query(
         "SELECT DISTINCT pk.keyword_id FROM ci_page_keywords pk JOIN ci_pages p ON p.page_id = pk.page_id "
@@ -164,8 +201,16 @@ def finalize_run(db: Database, crawl_run_id: str) -> None:
             occurrences = keyword_repo.list_occurrences(row["page_keyword_id"])
             body_occ = next((o for o in occurrences if o["element_type"] == "body"), None)
             occurrences_in_body = body_occ["occurrence_count"] if body_occ else 0
-            appears_in_lead = bool(body_occ and body_occ["first_position"] is not None and body_occ["first_position"] < 200)
-            content_score = scorer.compute_content_score(occurrences_in_body, doc_freq, total_docs, appears_in_lead)
+            body_token_count, body_length_chars = body_stats(row["page_id"])
+            content_score = scorer.compute_content_score(
+                occurrences_in_body=occurrences_in_body,
+                body_token_count=body_token_count,
+                doc_freq=doc_freq,
+                total_docs=total_docs,
+                first_position=body_occ["first_position"] if body_occ else None,
+                last_position=body_occ["last_position"] if body_occ else None,
+                body_length_chars=body_length_chars,
+            )
 
             rule_boost = row["rule_boost"]
             reasons = _from_json(row["rule_boost_reasons_json"])

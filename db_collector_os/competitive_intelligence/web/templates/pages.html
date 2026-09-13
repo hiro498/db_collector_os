@@ -35,7 +35,7 @@
 <table>
 <thead><tr>
 <th>URL</th><th>Page Type</th><th>Title</th><th>Primary KW</th><th>Score</th><th>Intent</th>
-<th>Monetization Score</th><th>更新日</th>
+<th>Monetization Score</th><th>In/Out Links</th><th>TOP距離</th><th>更新日</th>
 </tr></thead>
 <tbody>
 {% for p in pages %}
@@ -47,10 +47,13 @@
 <td>{{ p.primary_keyword_score if p.primary_keyword_score is not none else "-" }}</td>
 <td>{{ p.primary_keyword_intent or "-" }}</td>
 <td>{{ p.monetization_score }} ({{ p.monetization_type }})</td>
+<td>{{ p.link_metrics.get("inbound_count", "-") }} / {{ p.link_metrics.get("outbound_count", "-") }}
+    {% if p.link_metrics.get("is_orphan") %}<span class="badge status-failed">orphan</span>{% endif %}</td>
+<td>{{ p.link_metrics.get("top_distance") if p.link_metrics.get("top_distance") is not none else "-" }}</td>
 <td>{{ p.updated_at_source or p.updated_at }}</td>
 </tr>
 {% else %}
-<tr><td colspan="8" class="muted">ページがありません。</td></tr>
+<tr><td colspan="10" class="muted">ページがありません。</td></tr>
 {% endfor %}
 </tbody>
 </table>

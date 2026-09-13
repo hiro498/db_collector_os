@@ -14,6 +14,7 @@ from ..database import Database
 from .crawler import CrawlEngine
 from .enums import InputMode
 from .exporter import export_all
+from .link_analyzer import compute_link_metrics
 from .repository.core import CrawlRunRepository, CrawlUrlRepository, DomainRepository
 from .repository.keywords import KeywordRepository
 from .repository.pages import PageRepository
@@ -122,6 +123,15 @@ def list_keywords(config: AppConfig, crawl_run_id: str, **filters: Any) -> list[
 def get_keyword_detail(config: AppConfig, crawl_run_id: str, keyword_id: str) -> dict[str, Any] | None:
     db = _db(config)
     return KeywordRepository(db).get_keyword_detail(keyword_id, crawl_run_id)
+
+
+def get_link_metrics(config: AppConfig, crawl_run_id: str) -> dict[str, dict[str, Any]]:
+    """Inbound/outbound counts, orphan flag, TOP distance, and a simple
+    PageRank per page_id (spec section 29) -- computed on demand from
+    `ci_internal_links` rather than persisted, so a future, more
+    sophisticated version needs no schema change."""
+    db = _db(config)
+    return compute_link_metrics(db, crawl_run_id)
 
 
 def export_csv(config: AppConfig, crawl_run_id: str, out_dir: str) -> list[str]:
