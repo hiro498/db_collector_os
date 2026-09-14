@@ -104,6 +104,27 @@ def create_ci_app(config: AppConfig) -> FastAPI:
             "indexable": indexable, "monetization_type": monetization_type, "min_score": min_score,
         })
 
+    @app.get("/runs/{run_id}/pages/{page_id}")
+    def page_detail(request: Request, run_id: str, page_id: str):
+        page = service.get_page(config, page_id)
+        if page is None or page["crawl_run_id"] != run_id:
+            return templates.TemplateResponse(request, "not_found.html", {"run_id": run_id}, status_code=404)
+        ai_analysis = service.get_ai_analysis(config, page_id)
+        evidence = service.get_ai_analysis_evidence(config, page_id) if ai_analysis else None
+        return templates.TemplateResponse(request, "page_detail.html", {
+            "run_id": run_id, "page": page, "ai_analysis": ai_analysis, "evidence": evidence,
+        })
+
+    @app.post("/runs/{run_id}/pages/{page_id}/ai-analyze")
+    def page_ai_analyze(run_id: str, page_id: str):
+        service.analyze_ai_page(config, page_id)
+        return RedirectResponse(url=f"/runs/{run_id}/pages/{page_id}", status_code=303)
+
+    @app.post("/runs/{run_id}/pages/{page_id}/ai-recompute")
+    def page_ai_recompute(run_id: str, page_id: str):
+        service.recompute_ai_analysis(config, page_id)
+        return RedirectResponse(url=f"/runs/{run_id}/pages/{page_id}", status_code=303)
+
     @app.get("/runs/{run_id}/keywords")
     def run_keywords(
         request: Request, run_id: str, offset: int = 0, importance: str | None = None,

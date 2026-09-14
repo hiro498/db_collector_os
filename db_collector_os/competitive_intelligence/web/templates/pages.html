@@ -40,7 +40,8 @@
 <tbody>
 {% for p in pages %}
 <tr>
-<td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url }}</a></td>
+<td><a href="/runs/{{ run_id }}/pages/{{ p.page_id }}">{{ p.url }}</a>
+    <a class="muted" href="{{ p.url }}" target="_blank" rel="noopener" title="open the live page">&#8599;</a></td>
 <td>{{ p.page_type }} <span class="muted">({{ p.page_type_confidence }})</span></td>
 <td>{{ p.title or "-" }}</td>
 <td>{{ p.primary_keyword or "-" }}</td>

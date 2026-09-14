@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title or page.url }} - ページ詳細{% endblock %}
+{% block content %}
+<h1>ページ詳細</h1>
+<p><a href="/runs/{{ run_id }}/pages">&larr; ページ一覧に戻る</a></p>
+<p><a href="{{ page.url }}" target="_blank" rel="noopener">{{ page.url }}</a><br>
+<span class="muted">{{ page.title or "-" }} / {{ page.page_type }} (confidence {{ page.page_type_confidence }}) /
+analysis_target={{ page.analysis_target }}</span></p>
+
+<h2>AI Search Analysis <span class="muted">(PHASE 12)</span></h2>
+{% if not ai_analysis %}
+<p class="muted">このページはまだAI Search Analysisを実行していません。</p>
+<form method="post" action="/runs/{{ run_id }}/pages/{{ page.page_id }}/ai-analyze">
+<button>AI Search Analysisを実行</button>
+</form>
+{% else %}
+<form method="post" action="/runs/{{ run_id }}/pages/{{ page.page_id }}/ai-recompute">
+<button class="secondary">再計算 (recompute)</button>
+</form>
+
+<div class="cards">
+<div class="card">
+  <div class="value">{{ ai_analysis.ai_citation_readiness_score if ai_analysis.ai_citation_readiness_score is not none else "-" }}</div>
+  <div class="label">AI Citation Readiness Score</div>
+</div>
+<div class="card">
+  <div class="value">{{ "Unavailable" if ai_analysis.ai_search_total_score is none else ai_analysis.ai_search_total_score }}</div>
+  <div class="label">AI Search Total Score</div>
+</div>
+</div>
+<p class="muted">
+"AI Citation Readiness Score" はこのページがAI Overviews/AI Modeに引用される可能性のある
+構造・情報資産をどれだけ備えているかの内部評価であり、実際に引用されていることを意味しません。
+"AI Search Total Score" は Organic/AIO/AI Mode 等の外部観測が揃わない限り Unavailable のままです。
+</p>
+
+<h3>7軸スコア</h3>
+<table>
+<thead><tr><th>軸</th><th>スコア</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td>Organic Visibility</td><td>-</td><td>{{ "Unavailable" if ai_analysis.organic_visibility_score is none else ai_analysis.organic_visibility_score }} <span class="muted">(External observation required)</span></td></tr>
+<tr><td>AIO Citation</td><td>-</td><td>{{ "Not observed" if ai_analysis.aio_citation_score is none else ai_analysis.aio_citation_score }} <span class="muted">(External observation required)</span></td></tr>
+<tr><td>AI Mode Citation</td><td>-</td><td>{{ "Not observed" if ai_analysis.ai_mode_citation_score is none else ai_analysis.ai_mode_citation_score }} <span class="muted">(External observation required)</span></td></tr>
+<tr><td>Fan-out Coverage (SERP)</td><td>-</td><td>{{ "Not observed" if ai_analysis.fanout_coverage_score is none else ai_analysis.fanout_coverage_score }} <span class="muted">(External observation required)</span></td></tr>
+<tr><td>Proprietary / Primary Information</td><td>{{ ai_analysis.proprietary_information_score }}</td><td>computed</td></tr>
+<tr><td>Evidence Freshness</td><td>{{ ai_analysis.evidence_freshness_score }}</td><td>computed</td></tr>
+<tr><td>Source Preference / Brand Affinity</td><td>-</td><td>{{ "Unavailable" if ai_analysis.source_affinity_score is none else ai_analysis.source_affinity_score }} <span class="muted">(External observation required; internal proxy: source_transparency_score={{ ai_analysis.source_transparency_score }})</span></td></tr>
+</tbody>
+</table>
+
+<h3>内部計算コンポーネント (ai_citation_readiness_score の内訳)</h3>
+<table>
+<thead><tr><th>Component</th><th>Score</th><th>根拠件数</th></tr></thead>
+<tbody>
+<tr><td>Numeric Facts (quality)</td><td>{{ ai_analysis.numeric_fact_quality_score }}</td><td>{{ evidence.numeric_facts|length }} facts</td></tr>
+<tr><td>Comparison Information</td><td>{{ ai_analysis.comparison_information_score }}</td><td>{{ evidence.comparisons|length }} structures</td></tr>
+<tr><td>AIO Extractability</td><td>{{ ai_analysis.aio_extractability_score }}</td><td>-</td></tr>
+<tr><td>AI Mode Content Coverage</td><td>{{ ai_analysis.ai_mode_content_coverage_score }}</td><td>subtopics={{ ai_analysis.subtopic_count }}, questions={{ ai_analysis.related_question_count }}, entities={{ ai_analysis.entity_coverage_count }}</td></tr>
+<tr><td>Fan-out Content Coverage</td><td>{{ ai_analysis.fanout_content_coverage_score }}</td><td>{{ evidence.fanout_queries|length }} subqueries</td></tr>
+</tbody>
+</table>
+
+<h3>Numeric Facts 根拠</h3>
+<table>
+<thead><tr><th>type</th><th>value</th><th>element</th><th>source text</th><th>confidence</th></tr></thead>
+<tbody>
+{% for f in evidence.numeric_facts %}
+<tr><td>{{ f.fact_type }}</td><td>{{ f.signal_value }}</td><td>{{ f.html_element }}</td><td class="muted">{{ f.source_text }}</td><td>{{ f.confidence }}</td></tr>
+{% else %}
+<tr><td colspan="5" class="muted">検出された数値ファクトはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h3>Comparison 根拠</h3>
+<table>
+<thead><tr><th>structure</th><th>entities</th><th>dimensions</th><th>normalized</th><th>same_condition</th></tr></thead>
+<tbody>
+{% for c in evidence.comparisons %}
+<tr><td>{{ c.structure_type }}</td><td>{{ c.entity_count }}</td><td>{{ c.dimension_count }}</td><td>{{ "yes" if c.normalized else "no" }}</td><td>{{ "yes" if c.same_condition else "no" }}</td></tr>
+{% else %}
+<tr><td colspan="5" class="muted">検出された比較構造はありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h3>Evidence Freshness 根拠</h3>
+<table>
+<thead><tr><th>event</th><th>before</th><th>after</th></tr></thead>
+<tbody>
+{% for e in evidence.freshness_events %}
+<tr><td>{{ e.event_type }}</td><td>{{ e.before_value }}</td><td>{{ e.after_value }}</td></tr>
+{% else %}
+<tr><td colspan="3" class="muted">検出された変化イベントはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h3>Fan-out Subquery Candidates</h3>
+<table>
+<thead><tr><th>intent</th><th>subquery</th><th>content covered</th><th>SERP observed</th></tr></thead>
+<tbody>
+{% for q in evidence.fanout_queries %}
+<tr><td>{{ q.intent_class }}</td><td>{{ q.subquery_text }}</td><td>{{ "yes" if q.covered_by_content else "no" }}</td><td>{{ "Not observed" if q.serp_observed is none else q.serp_observed }}</td></tr>
+{% else %}
+<tr><td colspan="4" class="muted">Fan-outクエリ候補がありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% endblock %}

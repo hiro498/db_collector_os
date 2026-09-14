@@ -11,6 +11,13 @@ from urllib.parse import urlsplit
 
 from ..config import AppConfig
 from ..database import Database
+from .ai_search import pipeline as ai_search_pipeline
+from .ai_search.repository import (
+    AiComparisonRepository,
+    AiFanoutQueryRepository,
+    AiFreshnessEventRepository,
+    AiNumericFactRepository,
+)
 from .crawler import CrawlEngine
 from .enums import InputMode
 from .exporter import export_all
@@ -132,6 +139,40 @@ def get_link_metrics(config: AppConfig, crawl_run_id: str) -> dict[str, dict[str
     sophisticated version needs no schema change."""
     db = _db(config)
     return compute_link_metrics(db, crawl_run_id)
+
+
+def get_page(config: AppConfig, page_id: str) -> dict[str, Any] | None:
+    db = _db(config)
+    return PageRepository(db).get(page_id)
+
+
+def analyze_ai_page(config: AppConfig, page_id: str) -> dict[str, Any]:
+    """PHASE 12: first-run AI Search Analysis for one page. Reads only
+    already-stored `ci_page_elements` -- makes no network request."""
+    db = _db(config)
+    return ai_search_pipeline.analyze_ai_page(db, page_id)
+
+
+def recompute_ai_analysis(config: AppConfig, page_id: str) -> dict[str, Any]:
+    """Re-run AI Search Analysis (identical operation to analyze_ai_page --
+    see ai_search/pipeline.py's docstring)."""
+    db = _db(config)
+    return ai_search_pipeline.recompute_ai_analysis(db, page_id)
+
+
+def get_ai_analysis(config: AppConfig, page_id: str) -> dict[str, Any] | None:
+    db = _db(config)
+    return ai_search_pipeline.get_ai_analysis(db, page_id)
+
+
+def get_ai_analysis_evidence(config: AppConfig, page_id: str) -> dict[str, list[dict[str, Any]]]:
+    db = _db(config)
+    return {
+        "numeric_facts": AiNumericFactRepository(db).list_for_page(page_id),
+        "comparisons": AiComparisonRepository(db).list_for_page(page_id),
+        "freshness_events": AiFreshnessEventRepository(db).list_for_page(page_id),
+        "fanout_queries": AiFanoutQueryRepository(db).list_for_page(page_id),
+    }
 
 
 def export_csv(config: AppConfig, crawl_run_id: str, out_dir: str) -> list[str]:

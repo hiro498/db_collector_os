@@ -74,6 +74,7 @@ def parse_page(html: str, url: str) -> ParsedPage:
     _extract_body(soup, page)
     _extract_inline_emphasis(soup, page)
     _extract_tables_and_faq(soup, page)
+    _extract_lists(soup, page)
     _extract_captions_and_alts(soup, page)
     _extract_buttons_and_cta(soup, page)
     _extract_boilerplate_containers(soup, page)
@@ -185,8 +186,21 @@ def _extract_tables_and_faq(soup: BeautifulSoup, page: ParsedPage) -> None:
         if caption:
             parts.append(caption.get_text(" ", strip=True))
         parts.extend(c.get_text(" ", strip=True) for c in header_cells[:10])
-        if parts:
-            _add(page, "table", " / ".join(p for p in parts if p))
+        rows = table.find_all("tr")
+        data_rows = rows[1:] if (rows and rows[0].find("th")) else rows
+        row_labels = []
+        for row in data_rows:
+            first_cell = row.find(("th", "td"))
+            if first_cell:
+                label = first_cell.get_text(" ", strip=True)
+                if label:
+                    row_labels.append(label)
+        text = " / ".join(p for p in parts if p) or " / ".join(row_labels[:10])
+        if text:
+            _add(page, "table", text, {
+                "row_count": len(row_labels), "column_count": len(header_cells),
+                "row_labels": row_labels[:20],
+            })
 
     for dl in soup.find_all("dl"):
         for dt in dl.find_all("dt"):
@@ -207,6 +221,23 @@ def _extract_tables_and_faq(soup: BeautifulSoup, page: ParsedPage) -> None:
                 answer = (item.get("acceptedAnswer") or {}).get("text", "")
                 if name:
                     _add(page, "faq", f"Q: {name} A: {answer}")
+
+
+def _extract_lists(soup: BeautifulSoup, page: ParsedPage) -> None:
+    """A `<ul>`/`<ol>` with 2+ items is a candidate comparison/enumeration
+    structure for ai_search.comparison (spec section 6: comparison
+    structure must be recognizable outside of `<table>` too). Lists inside
+    nav/header/footer are navigation, not content, and are skipped here
+    the same way _extract_body already treats those regions.
+    """
+    for list_tag in soup.find_all(("ul", "ol")):
+        if list_tag.find_parent(("nav", "header", "footer")):
+            continue
+        items = [li.get_text(" ", strip=True) for li in list_tag.find_all("li", recursive=False)]
+        items = [i for i in items if i]
+        if len(items) < 2:
+            continue
+        _add(page, "list", " ||| ".join(items), {"item_count": len(items)})
 
 
 def _extract_captions_and_alts(soup: BeautifulSoup, page: ParsedPage) -> None:

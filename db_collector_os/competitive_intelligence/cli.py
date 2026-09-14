@@ -117,6 +117,35 @@ def export(ctx: click.Context, run_id: str, out_dir: str) -> None:
         click.echo(path)
 
 
+@ci.command("ai-analyze")
+@click.argument("page_id")
+@click.pass_context
+def ai_analyze(ctx: click.Context, page_id: str) -> None:
+    """PHASE 12: run AI Search Analysis for one already-crawled page."""
+    result = service.analyze_ai_page(ctx.obj["config"], page_id)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@ci.command("ai-recompute")
+@click.argument("page_id")
+@click.pass_context
+def ai_recompute(ctx: click.Context, page_id: str) -> None:
+    """Re-run AI Search Analysis from stored page elements (no re-crawl)."""
+    result = service.recompute_ai_analysis(ctx.obj["config"], page_id)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@ci.command("ai-status")
+@click.argument("page_id")
+@click.pass_context
+def ai_status(ctx: click.Context, page_id: str) -> None:
+    result = service.get_ai_analysis(ctx.obj["config"], page_id)
+    if result is None:
+        click.echo(f"no AI Search Analysis for page: {page_id}", err=True)
+        sys.exit(1)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
 @ci.group("web")
 def web() -> None:
     """Competitive Intelligence Web Dashboard process."""
