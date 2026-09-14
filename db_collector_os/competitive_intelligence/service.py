@@ -12,6 +12,17 @@ from urllib.parse import urlsplit
 from ..config import AppConfig
 from ..database import Database
 from .ai_search import pipeline as ai_search_pipeline
+from .ai_search.observation.config import DEFAULT_CONFIG as OBSERVATION_CONFIG
+from .ai_search.observation.importer import import_observation_file
+from .ai_search.observation.pipeline import get_page_visibility as _get_page_visibility
+from .ai_search.observation.pipeline import recompute_page_visibility as _recompute_page_visibility
+from .ai_search.observation.providers import (
+    NullAioObservationProvider,
+    NullAiModeObservationProvider,
+    NullFanoutObservationProvider,
+    NullOrganicSerpProvider,
+)
+from .ai_search.observation.repository import ImportBatchRepository
 from .ai_search.repository import (
     AiComparisonRepository,
     AiFanoutQueryRepository,
@@ -178,3 +189,89 @@ def get_ai_analysis_evidence(config: AppConfig, page_id: str) -> dict[str, list[
 def export_csv(config: AppConfig, crawl_run_id: str, out_dir: str) -> list[str]:
     db = _db(config)
     return export_all(db, crawl_run_id, out_dir)
+
+
+def get_page_visibility(config: AppConfig, page_id: str) -> dict[str, Any] | None:
+    """PHASE 13: reads the stored Readiness-vs-Reality rollup for one page
+    (or None if `recompute_page_visibility` has never run for it -- no
+    on-the-fly computation here, so a caller reading `None` never confuses
+    "not yet computed" with "computed and found nothing")."""
+    db = _db(config)
+    return _get_page_visibility(db, page_id)
+
+
+def recompute_page_visibility(config: AppConfig, page_id: str) -> dict[str, Any]:
+    """Rolls up whatever external observations are currently stored (via
+    `import_observation`) against PHASE 12's internal readiness score for
+    one page. Makes no network request itself."""
+    db = _db(config)
+    return _recompute_page_visibility(db, page_id)
+
+
+def import_observation(
+    config: AppConfig, file_path: str, observation_type: str, provider: str | None = None,
+) -> dict[str, Any]:
+    """Offline import of externally-gathered SERP/AIO/AI-Mode/fan-out/GSC
+    data (spec: the primary path to real observation data in this
+    environment -- see observation/__init__.py)."""
+    db = _db(config)
+    return import_observation_file(db, file_path, observation_type, provider=provider)
+
+
+def list_observation_import_batches(config: AppConfig, limit: int = 50) -> list[dict[str, Any]]:
+    db = _db(config)
+    return ImportBatchRepository(db).list_recent(limit=limit)
+
+
+def observation_status(config: AppConfig) -> dict[str, Any]:
+    """High-level counts of what has actually been imported/computed so far
+    (spec: `ci observation status`) -- every count reflects real stored
+    rows, never an estimate."""
+    db = _db(config)
+
+    def _count(table: str) -> int:
+        row = db.query_one(f"SELECT COUNT(*) AS n FROM {table}")
+        return row["n"] if row else 0
+
+    return {
+        "serp_observations": _count("ci_serp_observations"),
+        "aio_observations": _count("ci_aio_observations"),
+        "ai_mode_observations": _count("ci_ai_mode_observations"),
+        "fanout_observations": _count("ci_fanout_observations"),
+        "gsc_observations": _count("ci_gsc_observations"),
+        "pages_with_visibility_computed": _count("ci_ai_page_visibility"),
+        "import_batches": _count("ci_observation_import_batches"),
+    }
+
+
+_OBSERVE_PROVIDERS: dict[str, Any] = {
+    "organic": NullOrganicSerpProvider(),
+    "aio": NullAioObservationProvider(),
+    "ai-mode": NullAiModeObservationProvider(),
+    "fanout": NullFanoutObservationProvider(),
+}
+
+
+def observe(
+    config: AppConfig, surface: str, query: str, country: str | None = None,
+    language: str | None = None, device: str | None = None,
+) -> dict[str, Any]:
+    """Runs the configured live provider for one surface/query (spec: `ci
+    observe organic/aio/ai-mode/fanout QUERY`). Every provider (see
+    observation/providers.py) always returns a status of
+    available/unavailable/blocked/error -- this never raises on a blocked
+    or unreachable network, and never fabricates a result. The default
+    providers make no network call at all (this environment's own access
+    to general external sites is a known, confirmed block -- see the
+    observation package's docstring) and report `unavailable`."""
+    if surface not in _OBSERVE_PROVIDERS:
+        raise ValueError(f"unknown observation surface: {surface!r} (expected one of {sorted(_OBSERVE_PROVIDERS)})")
+    provider = _OBSERVE_PROVIDERS[surface]
+    result = provider.fetch(
+        query, country or OBSERVATION_CONFIG.default_country, language or OBSERVATION_CONFIG.default_language,
+        device or OBSERVATION_CONFIG.default_device,
+    )
+    return {
+        "surface": surface, "query": query, "provider": result.provider, "status": result.status,
+        "observed_at": result.observed_at, "error_message": result.error_message,
+    }

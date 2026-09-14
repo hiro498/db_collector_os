@@ -111,8 +111,10 @@ def create_ci_app(config: AppConfig) -> FastAPI:
             return templates.TemplateResponse(request, "not_found.html", {"run_id": run_id}, status_code=404)
         ai_analysis = service.get_ai_analysis(config, page_id)
         evidence = service.get_ai_analysis_evidence(config, page_id) if ai_analysis else None
+        visibility = service.get_page_visibility(config, page_id)
         return templates.TemplateResponse(request, "page_detail.html", {
             "run_id": run_id, "page": page, "ai_analysis": ai_analysis, "evidence": evidence,
+            "visibility": visibility,
         })
 
     @app.post("/runs/{run_id}/pages/{page_id}/ai-analyze")
@@ -123,6 +125,14 @@ def create_ci_app(config: AppConfig) -> FastAPI:
     @app.post("/runs/{run_id}/pages/{page_id}/ai-recompute")
     def page_ai_recompute(run_id: str, page_id: str):
         service.recompute_ai_analysis(config, page_id)
+        return RedirectResponse(url=f"/runs/{run_id}/pages/{page_id}", status_code=303)
+
+    @app.post("/runs/{run_id}/pages/{page_id}/visibility-recompute")
+    def page_visibility_recompute(run_id: str, page_id: str):
+        """PHASE 13: re-rolls up whatever external observations are
+        currently stored (via `ci observation import`) -- makes no network
+        request itself."""
+        service.recompute_page_visibility(config, page_id)
         return RedirectResponse(url=f"/runs/{run_id}/pages/{page_id}", status_code=303)
 
     @app.get("/runs/{run_id}/keywords")

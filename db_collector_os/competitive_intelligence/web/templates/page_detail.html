@@ -108,4 +108,77 @@ analysis_target={{ page.analysis_target }}</span></p>
 </tbody>
 </table>
 {% endif %}
+
+<h2>External Observation <span class="muted">(PHASE 13 -- Readiness vs Reality)</span></h2>
+<form method="post" action="/runs/{{ run_id }}/pages/{{ page.page_id }}/visibility-recompute">
+<button class="secondary">観測データから再計算 (recompute from stored observations)</button>
+</form>
+<p class="muted">
+実際にSearch/AIO/AI Mode/Fan-outを外部観測した結果であり、内部評価 (AI Citation Readiness Score) とは
+物理的に別のテーブルに保存されています。観測データが1件もない項目は必ず "Not Observed" と表示され、
+0や未引用と混同されることはありません。観測データは <code>ci observation import</code> で取り込みます。
+</p>
+{% if not visibility %}
+<p class="muted">このページはまだ外部観測ロールアップを実行していません。</p>
+{% else %}
+<div class="cards">
+<div class="card">
+  <div class="value">{{ "Not Observed" if visibility.organic_rank is none else visibility.organic_rank }}</div>
+  <div class="label">Organic Rank</div>
+</div>
+<div class="card">
+  <div class="value">{{ "Not Observed" if visibility.aio_cited is none else ("Cited" if visibility.aio_cited else "Not Cited") }}</div>
+  <div class="label">AI Overviews Citation</div>
+</div>
+<div class="card">
+  <div class="value">{{ "Not Observed" if visibility.ai_mode_cited is none else ("Cited" if visibility.ai_mode_cited else "Not Cited") }}</div>
+  <div class="label">AI Mode Citation</div>
+</div>
+<div class="card">
+  <div class="value">{{ "Not Observed" if visibility.readiness_vs_reality_class is none else visibility.readiness_vs_reality_class }}</div>
+  <div class="label">Readiness vs Reality</div>
+</div>
+</div>
+
+<table>
+<thead><tr><th>指標</th><th>値</th></tr></thead>
+<tbody>
+<tr><td>Organic Top3 / Top10 / Top20 / Top100</td>
+    <td>{{ "Not Observed" if visibility.organic_rank is none else (visibility.organic_top3|string + " / " + visibility.organic_top10|string + " / " + visibility.organic_top20|string + " / " + visibility.organic_top100|string) }}</td></tr>
+<tr><td>Organic observed at</td><td>{{ visibility.organic_observed_at or "Not Observed" }}</td></tr>
+<tr><td>AIO citation position</td><td>{{ "Not Observed" if visibility.aio_citation_position is none else visibility.aio_citation_position }}</td></tr>
+<tr><td>AIO first seen / last seen</td><td>{{ visibility.aio_first_seen or "-" }} / {{ visibility.aio_last_seen or "-" }}</td></tr>
+<tr><td>AIO observation count / citation count</td><td>{{ visibility.aio_observation_count }} / {{ visibility.aio_citation_count }}</td></tr>
+<tr><td>AIO citation frequency / persistence score</td>
+    <td>{{ "Not Observed" if visibility.aio_citation_frequency is none else visibility.aio_citation_frequency }} /
+        {{ "Not Observed" if visibility.aio_persistence_score is none else visibility.aio_persistence_score }}</td></tr>
+<tr><td>AI Mode citation position</td><td>{{ "Not Observed" if visibility.ai_mode_citation_position is none else visibility.ai_mode_citation_position }}</td></tr>
+<tr><td>AI Mode first seen / last seen</td><td>{{ visibility.ai_mode_first_seen or "-" }} / {{ visibility.ai_mode_last_seen or "-" }}</td></tr>
+<tr><td>AI Mode observation count / citation count</td><td>{{ visibility.ai_mode_observation_count }} / {{ visibility.ai_mode_citation_count }}</td></tr>
+<tr><td>AI Mode citation frequency / persistence score</td>
+    <td>{{ "Not Observed" if visibility.ai_mode_citation_frequency is none else visibility.ai_mode_citation_frequency }} /
+        {{ "Not Observed" if visibility.ai_mode_persistence_score is none else visibility.ai_mode_persistence_score }}</td></tr>
+<tr><td>Fan-out queries total / observed</td><td>{{ visibility.fanout_queries_total }} / {{ visibility.fanout_queries_observed }}</td></tr>
+<tr><td>Fan-out Top10 / Top20 / cited</td><td>{{ visibility.fanout_top10_count }} / {{ visibility.fanout_top20_count }} / {{ visibility.fanout_citation_count }}</td></tr>
+<tr><td>Fan-out visibility rate</td><td>{{ "Not Observed" if visibility.fanout_visibility_rate is none else visibility.fanout_visibility_rate }}</td></tr>
+<tr><td>Organic x AIO cross class</td><td>{{ visibility.organic_aio_cross_class or "Not Observed" }}</td></tr>
+</tbody>
+</table>
+
+<h3>Opportunity Signals</h3>
+<p class="muted">個別の真偽シグナルのみ (統合 Opportunity Score はこのフェーズでは未実装)。</p>
+<table>
+<thead><tr><th>signal</th><th>value</th></tr></thead>
+<tbody>
+<tr><td>High Readiness, Not Cited</td><td>{{ "Not Observed" if visibility.signal_high_readiness_not_cited is none else visibility.signal_high_readiness_not_cited }}</td></tr>
+<tr><td>Low Rank, But Cited</td><td>{{ "Not Observed" if visibility.signal_low_rank_but_cited is none else visibility.signal_low_rank_but_cited }}</td></tr>
+<tr><td>High Rank, Not Cited</td><td>{{ "Not Observed" if visibility.signal_high_rank_not_cited is none else visibility.signal_high_rank_not_cited }}</td></tr>
+<tr><td>Fan-out Visible, Root Not Visible</td><td>{{ "Not Observed" if visibility.signal_fanout_visible_not_root_visible is none else visibility.signal_fanout_visible_not_root_visible }}</td></tr>
+<tr><td>AIO Only</td><td>{{ "Not Observed" if visibility.signal_aio_only is none else visibility.signal_aio_only }}</td></tr>
+<tr><td>AI Mode Only</td><td>{{ "Not Observed" if visibility.signal_ai_mode_only is none else visibility.signal_ai_mode_only }}</td></tr>
+<tr><td>AIO and AI Mode</td><td>{{ "Not Observed" if visibility.signal_aio_and_ai_mode is none else visibility.signal_aio_and_ai_mode }}</td></tr>
+<tr><td>Organic Only (no AI citation)</td><td>{{ "Not Observed" if visibility.signal_organic_only is none else visibility.signal_organic_only }}</td></tr>
+</tbody>
+</table>
+{% endif %}
 {% endblock %}
