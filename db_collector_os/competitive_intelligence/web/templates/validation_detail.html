@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Validation Detail{% endblock %}
+{% block content %}
+<h1>Production Validation Detail</h1>
+<p><a href="/validations">&larr; Validation一覧に戻る</a></p>
+<p class="muted">{{ run.target_url }} / status={{ run.status }} / max_pages={{ run.max_pages }}</p>
+
+<div class="cards">
+<div class="card"><div class="value">{{ run.production_validation_status or "-" }}</div><div class="label">Production Validation Status</div></div>
+<div class="card"><div class="value">{{ "%.0f%%"|format(run.top50_ab_rate * 100) if run.top50_ab_rate is not none else "Not Observed" }}</div><div class="label">TOP50 A+B Rate {{ "(Human Audited)" if run.top50_ab_rate_is_human_audited else "(Auto Quality)" }}</div></div>
+<div class="card"><div class="value">{{ summary.pages_analyzed }}</div><div class="label">Pages Analyzed</div></div>
+<div class="card"><div class="value">{{ summary.keywords_total }}</div><div class="label">Keywords Total</div></div>
+<div class="card"><div class="value">{{ summary.high_opportunity_keywords }}</div><div class="label">High Opportunity Keywords</div></div>
+<div class="card"><div class="value">{{ summary.blue_ocean_candidates }}</div><div class="label">Blue Ocean Candidates</div></div>
+</div>
+
+{% if summary.warnings %}
+<h2>Warnings</h2>
+<ul>{% for w in summary.warnings %}<li class="muted">{{ w }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Target Keywords</h2>
+<p><a href="/validations/{{ run.validation_run_id }}/export?file=target_keywords.csv">target_keywords.csv</a> |
+<a href="/validations/{{ run.validation_run_id }}/export?file=summary.json">summary.json</a></p>
+<table>
+<thead><tr>
+<th>Rank</th><th>Keyword</th><th>Intent</th><th>Commercial</th><th>Opportunity</th><th>Confidence</th>
+<th>Reason</th><th>Action</th>
+</tr></thead>
+<tbody>
+{% for k in target_keywords %}
+<tr>
+  <td>{{ k.priority_rank }}</td>
+  <td>{{ k.keyword }}</td>
+  <td>{{ k.intent or "-" }}</td>
+  <td>{{ "Not Observed" if k.commercial_score is none else k.commercial_score }} ({{ k.money_keyword_class or "-" }})</td>
+  <td>{{ "Not Observed" if k.opportunity_score is none else k.opportunity_score }}</td>
+  <td>{{ k.confidence_label or "-" }}</td>
+  <td>{{ k.top_reason_text or "-" }}</td>
+  <td>{{ k.recommended_action or "-" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="muted">Target Keywordデータはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Human Audit</h2>
+<form method="post" action="/validations/{{ run.validation_run_id }}/audit" class="filters">
+<input type="text" name="normalized_keyword" placeholder="normalized_keyword" required>
+<select name="audit_class"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+<input type="text" name="audit_note" placeholder="note (optional)">
+<button type="submit">Save Audit</button>
+</form>
+<p class="muted">Human audit_class is stored separately from the machine audit_class_auto and only affects the
+TOP50 A+B Rate once every TOP50 candidate has been human-audited.</p>
+{% endblock %}

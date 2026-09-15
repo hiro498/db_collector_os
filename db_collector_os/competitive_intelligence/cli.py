@@ -368,6 +368,97 @@ def opportunity_export(ctx: click.Context, out_dir: str) -> None:
         click.echo(path)
 
 
+@ci.command("validate-domain")
+@click.argument("url")
+@click.option("--max-pages", default=None, type=int, help="Safety cap on pages fetched (default: 30).")
+@click.option("--rate-limit", default=None, type=float, help="Requests per second against the target domain (default: 1).")
+@click.option("--output-dir", default=None, help="Directory to write summary.json/*.csv into.")
+@click.option("--db", "db_path_override", default=None, help="Override the configured DB path for this run.")
+@click.option("--resume", "resume_validation_run_id", default=None, help="Resume a previously started validation_run_id.")
+@click.option("--our-domain-run", "our_domain_run_id", default=None,
+              help="An existing crawl_run_id of our own site, to compute real PHASE 14 Opportunity/content-gap "
+                   "scores against; omitted keywords get NOT_ENOUGH_DATA, never a guessed page.")
+@click.pass_context
+def validate_domain(
+    ctx: click.Context, url: str, max_pages: int | None, rate_limit: float | None, output_dir: str | None,
+    db_path_override: str | None, resume_validation_run_id: str | None, our_domain_run_id: str | None,
+) -> None:
+    """PHASE 15: end-to-end Production Validation -- crawl, classify,
+    extract/aggregate keywords, integrate AI Readiness/Observation/
+    Opportunity, and rank Target Keywords for one domain. Safety default:
+    max 30 pages, 1 req/sec, GET/HEAD only, robots.txt-respecting (all
+    reused from the existing crawler, unchanged)."""
+    config: AppConfig = ctx.obj["config"]
+    if db_path_override:
+        import dataclasses
+        from pathlib import Path
+
+        config = dataclasses.replace(config, db_path=Path(db_path_override))
+    validation_run_id = service.validate_domain(
+        config, url, max_pages=max_pages, rate_limit=rate_limit, output_dir=output_dir,
+        our_domain_run_id=our_domain_run_id, resume_validation_run_id=resume_validation_run_id,
+    )
+    if output_dir:
+        service.export_validation_csv(config, validation_run_id, output_dir)
+    run = service.get_validation_run(config, validation_run_id)
+    click.echo(json.dumps(run, indent=2, ensure_ascii=False, default=str))
+
+
+@ci.group("validation")
+def validation() -> None:
+    """PHASE 15: Production Validation run management."""
+
+
+@validation.command("list")
+@click.option("--limit", default=50, type=int)
+@click.pass_context
+def validation_list(ctx: click.Context, limit: int) -> None:
+    for run in service.list_validation_runs(ctx.obj["config"], limit=limit):
+        click.echo(
+            f"{run['validation_run_id']:20} status={run['status']:10} "
+            f"pv_status={run['production_validation_status'] or '-':18} "
+            f"top50_ab={run['top50_ab_rate']!s:6} url={run['target_url']}"
+        )
+
+
+@validation.command("show")
+@click.argument("run_id")
+@click.pass_context
+def validation_show(ctx: click.Context, run_id: str) -> None:
+    run = service.get_validation_run(ctx.obj["config"], run_id)
+    if run is None:
+        click.echo(f"no such validation_run: {run_id}", err=True)
+        sys.exit(1)
+    click.echo(json.dumps(run, indent=2, ensure_ascii=False, default=str))
+
+
+@validation.command("export")
+@click.argument("run_id")
+@click.option("--out-dir", default="./var/validation_exports")
+@click.pass_context
+def validation_export(ctx: click.Context, run_id: str, out_dir: str) -> None:
+    paths = service.export_validation_csv(ctx.obj["config"], run_id, out_dir)
+    for path in paths:
+        click.echo(path)
+
+
+@validation.command("audit")
+@click.argument("run_id")
+@click.argument("normalized_keyword")
+@click.option("--class", "audit_class", required=True, type=click.Choice(["A", "B", "C", "D"]))
+@click.option("--note", default=None)
+@click.pass_context
+def validation_audit(ctx: click.Context, run_id: str, normalized_keyword: str, audit_class: str, note: str | None) -> None:
+    """Records a human audit_class/audit_note for one TOP100 keyword
+    candidate (spec section 31) -- stored separately from the machine
+    audit_class_auto, never overwriting it."""
+    ok = service.set_keyword_human_audit(ctx.obj["config"], run_id, normalized_keyword, audit_class, note)
+    if not ok:
+        click.echo(f"no such keyword {normalized_keyword!r} in validation_run {run_id}", err=True)
+        sys.exit(1)
+    click.echo("ok")
+
+
 @ci.group("web")
 def web() -> None:
     """Competitive Intelligence Web Dashboard process."""

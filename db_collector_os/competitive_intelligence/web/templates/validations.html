@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Production Validations{% endblock %}
+{% block content %}
+<h1>Production Validations <span class="muted">(PHASE 15)</span></h1>
+<table>
+<thead><tr>
+<th>Target URL</th><th>Status</th><th>Production Validation Status</th><th>TOP50 A+B Rate</th><th>Started</th>
+</tr></thead>
+<tbody>
+{% for r in runs %}
+<tr>
+  <td><a href="/validations/{{ r.validation_run_id }}">{{ r.target_url }}</a></td>
+  <td>{{ r.status }}</td>
+  <td>{{ r.production_validation_status or "-" }}</td>
+  <td>{{ "%.0f%%"|format(r.top50_ab_rate * 100) if r.top50_ab_rate is not none else "Not Observed" }}
+      {{ "(human-audited)" if r.top50_ab_rate_is_human_audited else "(auto quality)" if r.top50_ab_rate is not none }}</td>
+  <td>{{ r.started_at }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="muted">まだValidation実行がありません。`ci validate-domain URL` で開始してください。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

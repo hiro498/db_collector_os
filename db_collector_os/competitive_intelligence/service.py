@@ -353,3 +353,72 @@ def export_opportunity_csv(config: AppConfig, out_dir: str) -> list[str]:
 
     db = _db(config)
     return export_opportunity_all(db, out_dir)
+
+
+# ---------------------------------------------------------------------------
+# PHASE 15: Production Validation / Target Keyword Discovery
+# ---------------------------------------------------------------------------
+
+def validate_domain(
+    config: AppConfig, target_url: str, max_pages: int | None = None, rate_limit: float | None = None,
+    output_dir: str | None = None, our_domain_run_id: str | None = None,
+    resume_validation_run_id: str | None = None,
+) -> str:
+    from .validation import ValidationOptions, run_validation
+    from .validation.config import DEFAULT_MAX_PAGES, DEFAULT_RATE_LIMIT_REQUESTS_PER_SECOND
+
+    db = _db(config)
+    options = ValidationOptions(
+        max_pages=DEFAULT_MAX_PAGES if max_pages is None else max_pages,
+        rate_limit_requests_per_second=DEFAULT_RATE_LIMIT_REQUESTS_PER_SECOND if rate_limit is None else rate_limit,
+        output_dir=output_dir, our_domain_run_id=our_domain_run_id,
+        resume_validation_run_id=resume_validation_run_id, user_agent=config.user_agent,
+    )
+    return run_validation(db, target_url, options)
+
+
+def get_validation_run(config: AppConfig, validation_run_id: str) -> dict[str, Any] | None:
+    from .validation.repository import ValidationRunRepository
+
+    db = _db(config)
+    return ValidationRunRepository(db).get(validation_run_id)
+
+
+def list_validation_runs(config: AppConfig, limit: int = 50) -> list[dict[str, Any]]:
+    from .validation.repository import ValidationRunRepository
+
+    db = _db(config)
+    return ValidationRunRepository(db).list_recent(limit=limit)
+
+
+def get_target_keywords(config: AppConfig, validation_run_id: str, limit: int = 100_000) -> list[dict[str, Any]]:
+    from .validation.repository import TargetKeywordPriorityRepository
+
+    db = _db(config)
+    return TargetKeywordPriorityRepository(db).list_for_run(validation_run_id, limit=limit)
+
+
+def get_domain_keyword_summary(config: AppConfig, validation_run_id: str, limit: int = 100_000) -> list[dict[str, Any]]:
+    from .validation.repository import DomainKeywordSummaryRepository
+
+    db = _db(config)
+    return DomainKeywordSummaryRepository(db).list_for_run(validation_run_id, limit=limit)
+
+
+def set_keyword_human_audit(
+    config: AppConfig, validation_run_id: str, normalized_keyword: str, audit_class: str | None,
+    audit_note: str | None,
+) -> bool:
+    from .validation.repository import DomainKeywordSummaryRepository
+
+    db = _db(config)
+    return DomainKeywordSummaryRepository(db).set_human_audit(
+        validation_run_id, normalized_keyword, audit_class, audit_note
+    )
+
+
+def export_validation_csv(config: AppConfig, validation_run_id: str, out_dir: str) -> list[str]:
+    from .validation.exporter import export_all as export_validation_all
+
+    db = _db(config)
+    return export_validation_all(db, validation_run_id, out_dir)

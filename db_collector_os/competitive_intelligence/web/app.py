@@ -223,6 +223,45 @@ def create_ci_app(config: AppConfig) -> FastAPI:
         content_gaps = service.list_content_gaps_for_page(config, our_page_id) if our_page_id else []
         return templates.TemplateResponse(request, "opportunity_detail.html", {**detail, "content_gaps": content_gaps})
 
+    @app.get("/validations")
+    def validation_list(request: Request):
+        """PHASE 15: Production Validation一覧."""
+        runs = service.list_validation_runs(config, limit=200)
+        return templates.TemplateResponse(request, "validations.html", {"runs": runs})
+
+    @app.get("/validations/{validation_run_id}")
+    def validation_detail(request: Request, validation_run_id: str):
+        run = service.get_validation_run(config, validation_run_id)
+        if run is None:
+            return templates.TemplateResponse(request, "not_found.html", {"run_id": ""}, status_code=404)
+        import json as _json
+        summary = _json.loads(run["summary_json"]) if run["summary_json"] else {}
+        target_keywords = service.get_target_keywords(config, validation_run_id, limit=200)
+        return templates.TemplateResponse(request, "validation_detail.html", {
+            "run": run, "summary": summary, "target_keywords": target_keywords,
+        })
+
+    @app.post("/validations/{validation_run_id}/audit")
+    def validation_audit(
+        validation_run_id: str, normalized_keyword: str = Form(...), audit_class: str = Form(...),
+        audit_note: str = Form(""),
+    ):
+        service.set_keyword_human_audit(config, validation_run_id, normalized_keyword, audit_class, audit_note or None)
+        return RedirectResponse(url=f"/validations/{validation_run_id}", status_code=303)
+
+    @app.get("/validations/{validation_run_id}/export")
+    def validation_export(validation_run_id: str, file: str = "target_keywords.csv"):
+        allowed = {
+            "summary.json", "pages.csv", "keywords_all.csv", "keywords_top100.csv", "target_keywords.csv",
+            "content_map.csv", "opportunities.csv", "noise_audit.csv", "errors.csv",
+        }
+        if file not in allowed:
+            return RedirectResponse(url=f"/validations/{validation_run_id}")
+        out_dir = Path(config.home_dir) / "validation_exports" / validation_run_id
+        service.export_validation_csv(config, validation_run_id, str(out_dir))
+        media_type = "application/json" if file.endswith(".json") else "text/csv"
+        return FileResponse(out_dir / file, filename=file, media_type=media_type)
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True}

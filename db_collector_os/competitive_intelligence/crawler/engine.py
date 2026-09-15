@@ -36,10 +36,16 @@ MAX_FETCH_ATTEMPTS = 3
 
 
 class CrawlEngine:
-    def __init__(self, db: Database, user_agent: str, js_fallback: JSFallbackFetcher | None = None):
+    def __init__(
+        self, db: Database, user_agent: str, js_fallback: JSFallbackFetcher | None = None,
+        rate_limit_delay_seconds: float | None = None,
+    ):
         self.db = db
         self.fetch_engine = FetchEngine(user_agent=user_agent)
         self.rate_limiter = DomainRateLimiter(db)
+        # Defaults to DomainRateLimiter.is_allowed's own default (1 req/sec)
+        # when not given -- existing callers see no behavior change.
+        self.rate_limit_delay_seconds = rate_limit_delay_seconds if rate_limit_delay_seconds is not None else 1.0
         self.js_fallback = js_fallback
         self.domains = DomainRepository(db)
         self.runs = CrawlRunRepository(db)
@@ -61,7 +67,9 @@ class CrawlEngine:
         self._drain(crawl_run_id, host, single_page=True)
         return crawl_run_id
 
-    def start_affiliate_domain(self, url: str, requested_mode: str, vertical: str = "general") -> str:
+    def start_affiliate_domain(
+        self, url: str, requested_mode: str, vertical: str = "general", max_pages: int | None = None,
+    ) -> str:
         normalized = normalize_url(url)
         host = extract_host(normalized)
         domain = self.domains.get_or_create(host, target_type=InputMode.AFFILIATE_DOMAIN, vertical=vertical)
@@ -77,17 +85,20 @@ class CrawlEngine:
             )
         self.runs.update_audit(crawl_run_id, sitemap_phase_done=1, sitemap_index_phase_done=1)
 
-        self._drain(crawl_run_id, host, single_page=False)
+        self._drain(crawl_run_id, host, single_page=False, max_pages=max_pages)
         return crawl_run_id
 
-    def resume(self, crawl_run_id: str) -> str:
+    def resume(self, crawl_run_id: str, max_pages: int | None = None) -> str:
         run = self.runs.get(crawl_run_id)
         if not run:
             raise ValueError(f"no such crawl_run: {crawl_run_id}")
         self.runs.clear_stop(crawl_run_id)
         self.runs.set_status(crawl_run_id, CrawlRunStatus.RUNNING)
         domain = self.domains.get(run["domain_id"])
-        self._drain(crawl_run_id, domain["domain"], single_page=(run["input_mode"] == InputMode.ADVERTISER_LP))
+        self._drain(
+            crawl_run_id, domain["domain"], single_page=(run["input_mode"] == InputMode.ADVERTISER_LP),
+            max_pages=max_pages,
+        )
         return crawl_run_id
 
     def request_stop(self, crawl_run_id: str) -> None:
@@ -110,7 +121,7 @@ class CrawlEngine:
 
     # -- processing loop ------------------------------------------------------
 
-    def _drain(self, crawl_run_id: str, host: str, single_page: bool) -> None:
+    def _drain(self, crawl_run_id: str, host: str, single_page: bool, max_pages: int | None = None) -> None:
         iterations = 0
         while iterations < MAX_CONVERGENCE_ITERATIONS:
             iterations += 1
@@ -129,6 +140,9 @@ class CrawlEngine:
                     self._stop_safely(crawl_run_id)
                     return
                 self._process_one(crawl_run_id, crawl_url, host, single_page)
+                if max_pages is not None and self._fetched_page_count(crawl_run_id) >= max_pages:
+                    self._finalize_capped(crawl_run_id)
+                    return
 
             self.internal_links.resolve_targets(crawl_run_id)
             detect_and_mark_boilerplate(self.db, crawl_run_id)
@@ -165,7 +179,7 @@ class CrawlEngine:
             self.urls.mark_excluded(crawl_url_id, exclusion)
             return 0
 
-        allowed, wait = self.rate_limiter.is_allowed(host)
+        allowed, wait = self.rate_limiter.is_allowed(host, delay_seconds=self.rate_limit_delay_seconds)
         if not allowed:
             time.sleep(min(wait, 5.0))
         self.rate_limiter.record_request(host)
@@ -317,3 +331,22 @@ class CrawlEngine:
         else:
             error = None if audit["unresolved_count"] == 0 else "convergence_iteration_guard_reached"
             self.runs.set_status(crawl_run_id, CrawlRunStatus.STOPPED, error_message=error)
+
+    def _fetched_page_count(self, crawl_run_id: str) -> int:
+        row = self.db.query_one("SELECT COUNT(*) AS n FROM ci_pages WHERE crawl_run_id=?", (crawl_run_id,))
+        return row["n"] if row else 0
+
+    def _finalize_capped(self, crawl_run_id: str) -> None:
+        """An explicit, caller-supplied `max_pages` safety cap (PHASE 15
+        Production Validation) -- distinct from MAX_CONVERGENCE_ITERATIONS's
+        runaway-loop guard above, and never used unless a caller opts in.
+        Always reported as not-converged: capping a crawl for safety must
+        never be mistaken for a genuinely complete site crawl."""
+        self.internal_links.resolve_targets(crawl_run_id)
+        finalize_run(self.db, crawl_run_id)
+        self.runs.update_audit(
+            crawl_run_id, internal_link_phase_done=1, pagination_phase_done=1, site_aggregation_done=1,
+            converged=0,
+        )
+        audit_mod.recompute_audit(self.db, crawl_run_id)
+        self.runs.set_status(crawl_run_id, CrawlRunStatus.STOPPED, error_message="max_pages_limit_reached")
