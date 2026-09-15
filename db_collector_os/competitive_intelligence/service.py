@@ -23,6 +23,9 @@ from .ai_search.observation.providers import (
     NullOrganicSerpProvider,
 )
 from .ai_search.observation.repository import ImportBatchRepository
+from .opportunity import pipeline as opportunity_pipeline
+from .opportunity.demand_importer import import_keyword_metrics_file
+from .opportunity.repository import ContentGapRepository, OpportunityRepository
 from .ai_search.repository import (
     AiComparisonRepository,
     AiFanoutQueryRepository,
@@ -275,3 +278,78 @@ def observe(
         "surface": surface, "query": query, "provider": result.provider, "status": result.status,
         "observed_at": result.observed_at, "error_message": result.error_message,
     }
+
+
+# ---------------------------------------------------------------------------
+# PHASE 14: Opportunity Score / Cross-Competitor Comparison
+# ---------------------------------------------------------------------------
+
+def compute_page_opportunity(config: AppConfig, page_id: str, competitor_page_ids: list[str] | None = None) -> dict[str, Any]:
+    db = _db(config)
+    return opportunity_pipeline.compute_page_opportunity(db, page_id, competitor_page_ids)
+
+
+def compute_keyword_opportunity(
+    config: AppConfig, keyword_id: str, our_page_id: str, competitor_page_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    db = _db(config)
+    return opportunity_pipeline.compute_keyword_opportunity(db, keyword_id, our_page_id, competitor_page_ids)
+
+
+def get_opportunity(config: AppConfig, entity_type: str, entity_id: str, our_page_id: str | None = None) -> dict[str, Any] | None:
+    db = _db(config)
+    return opportunity_pipeline.get_opportunity(db, entity_type, entity_id, our_page_id)
+
+
+def get_opportunity_detail(config: AppConfig, opportunity_id: str) -> dict[str, Any] | None:
+    db = _db(config)
+    return opportunity_pipeline.get_opportunity_detail(db, opportunity_id)
+
+
+def list_opportunities(
+    config: AppConfig, entity_type: str | None = None, limit: int = 200, offset: int = 0,
+    min_commercial: float | None = None, min_ai_gap: float | None = None, min_content_gap: float | None = None,
+    min_confidence: float | None = None,
+) -> list[dict[str, Any]]:
+    db = _db(config)
+    return OpportunityRepository(db).list_analyses(
+        entity_type=entity_type, limit=limit, offset=offset, min_commercial=min_commercial,
+        min_ai_gap=min_ai_gap, min_content_gap=min_content_gap, min_confidence=min_confidence,
+    )
+
+
+def compare_pages(config: AppConfig, page_id_a: str, page_id_b: str) -> list[dict[str, Any]]:
+    db = _db(config)
+    return opportunity_pipeline.compare_pages(db, page_id_a, page_id_b)
+
+
+def compare_domains(config: AppConfig, domain_id_a: str, domain_id_b: str) -> list[dict[str, Any]]:
+    db = _db(config)
+    return opportunity_pipeline.compare_domains(db, domain_id_a, domain_id_b)
+
+
+def compare_keywords(config: AppConfig, keyword_id_a: str, keyword_id_b: str) -> list[dict[str, Any]]:
+    db = _db(config)
+    return opportunity_pipeline.compare_keywords(db, keyword_id_a, keyword_id_b)
+
+
+def list_content_gaps_for_page(config: AppConfig, our_page_id: str) -> list[dict[str, Any]]:
+    db = _db(config)
+    return ContentGapRepository(db).list_for_our_page(our_page_id)
+
+
+def recompute_all_opportunities(config: AppConfig, crawl_run_id: str | None = None) -> dict[str, int]:
+    db = _db(config)
+    return opportunity_pipeline.recompute_all(db, crawl_run_id)
+
+
+def import_keyword_metrics(config: AppConfig, file_path: str) -> dict[str, Any]:
+    db = _db(config)
+    return import_keyword_metrics_file(db, file_path)
+
+
+def export_opportunity_csv(config: AppConfig, out_dir: str) -> list[str]:
+    from .opportunity.exporter import export_all as export_opportunity_all
+
+    db = _db(config)
+    return export_opportunity_all(db, out_dir)

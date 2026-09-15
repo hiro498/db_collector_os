@@ -171,6 +171,58 @@ def create_ci_app(config: AppConfig) -> FastAPI:
         service.export_csv(config, run_id, str(out_dir))
         return FileResponse(out_dir / file, filename=file, media_type="text/csv")
 
+    @app.get("/opportunities")
+    def opportunity_list(
+        request: Request, entity_type: str | None = None, min_commercial: float | None = None,
+        min_ai_gap: float | None = None, min_content_gap: float | None = None, min_confidence: float | None = None,
+    ):
+        """PHASE 14: Opportunity一覧, sorted overall_opportunity_score DESC
+        (spec section 26). Not scoped to one crawl_run_id -- Opportunity
+        analyses are inherently cross-domain."""
+        rows = service.list_opportunities(
+            config, entity_type=entity_type or None, limit=200, min_commercial=min_commercial,
+            min_ai_gap=min_ai_gap, min_content_gap=min_content_gap, min_confidence=min_confidence,
+        )
+        return templates.TemplateResponse(request, "opportunities.html", {
+            "opportunities": rows, "entity_type": entity_type or "", "min_commercial": min_commercial,
+            "min_ai_gap": min_ai_gap, "min_content_gap": min_content_gap, "min_confidence": min_confidence,
+        })
+
+    @app.get("/opportunities/compare")
+    def opportunity_compare(request: Request, a: str, b: str):
+        comparisons = service.compare_pages(config, a, b)
+        page_a = service.get_page(config, a)
+        page_b = service.get_page(config, b)
+        return templates.TemplateResponse(request, "opportunity_compare.html", {
+            "page_a": page_a, "page_b": page_b, "comparisons": comparisons,
+        })
+
+    @app.post("/opportunities/recompute")
+    def opportunity_recompute(crawl_run_id: str = Form(None)):
+        service.recompute_all_opportunities(config, crawl_run_id or None)
+        return RedirectResponse(url="/opportunities", status_code=303)
+
+    @app.get("/opportunities/export")
+    def opportunity_export(file: str = "opportunities.csv"):
+        allowed = {"opportunities.csv", "competitor_comparison.csv", "content_gaps.csv"}
+        if file not in allowed:
+            return RedirectResponse(url="/opportunities")
+        out_dir = Path(config.home_dir) / "opportunity_exports"
+        service.export_opportunity_csv(config, str(out_dir))
+        return FileResponse(out_dir / file, filename=file, media_type="text/csv")
+
+    # Registered after the specific /opportunities/{compare,recompute,export}
+    # routes above -- a {opportunity_id} path parameter would otherwise
+    # greedily match those literal path segments first.
+    @app.get("/opportunities/{opportunity_id}")
+    def opportunity_detail(request: Request, opportunity_id: str):
+        detail = service.get_opportunity_detail(config, opportunity_id)
+        if detail is None:
+            return templates.TemplateResponse(request, "not_found.html", {"run_id": ""}, status_code=404)
+        our_page_id = detail["analysis"]["our_page_id"]
+        content_gaps = service.list_content_gaps_for_page(config, our_page_id) if our_page_id else []
+        return templates.TemplateResponse(request, "opportunity_detail.html", {**detail, "content_gaps": content_gaps})
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True}

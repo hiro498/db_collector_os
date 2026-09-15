@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Opportunities{% endblock %}
+{% block content %}
+<h1>Opportunities <span class="muted">(PHASE 14)</span></h1>
+<form class="filters" method="get" action="/opportunities">
+<select name="entity_type">
+  <option value="" {{ "selected" if not entity_type }}>All types</option>
+  <option value="page" {{ "selected" if entity_type == "page" }}>Page</option>
+  <option value="keyword" {{ "selected" if entity_type == "keyword" }}>Keyword</option>
+</select>
+<input type="number" name="min_commercial" placeholder="min commercial" value="{{ min_commercial or '' }}">
+<input type="number" name="min_ai_gap" placeholder="min AI gap" value="{{ min_ai_gap or '' }}">
+<input type="number" name="min_content_gap" placeholder="min content gap" value="{{ min_content_gap or '' }}">
+<input type="number" name="min_confidence" step="0.1" placeholder="min confidence (0-1)" value="{{ min_confidence or '' }}">
+<button type="submit">Filter</button>
+</form>
+<form method="post" action="/opportunities/recompute">
+<button class="secondary">全件再計算 (recompute all)</button>
+</form>
+
+<table>
+<thead><tr>
+<th>Type</th><th>Query / Page</th><th>Overall</th><th>Status</th><th>Confidence</th>
+<th>AI Gap</th><th>Content Gap</th><th>Commercial</th><th>Fanout Gap</th>
+</tr></thead>
+<tbody>
+{% for o in opportunities %}
+<tr>
+  <td>{{ o.entity_type }}</td>
+  <td><a href="/opportunities/{{ o.opportunity_id }}">{{ o.query or o.our_page_id or o.entity_id }}</a></td>
+  <td>{{ "Not Observed" if o.overall_opportunity_score is none else o.overall_opportunity_score }}</td>
+  <td>{{ o.score_status }}</td>
+  <td>{{ o.confidence_label }} ({{ o.confidence_value }})</td>
+  <td>{{ "Not Observed" if o.ai_opportunity_score is none else o.ai_opportunity_score }}</td>
+  <td>{{ "Not Observed" if o.content_gap_score is none else o.content_gap_score }}</td>
+  <td>{{ "Not Observed" if o.commercial_opportunity_score is none else o.commercial_opportunity_score }}</td>
+  <td>{{ "Not Observed" if o.fanout_opportunity_score is none else o.fanout_opportunity_score }}</td>
+</tr>
+{% else %}
+<tr><td colspan="9" class="muted">まだOpportunity分析がありません。CLIの `ci opportunity page/keyword` または上の再計算ボタンで作成してください。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<p><a href="/opportunities/export?file=opportunities.csv">opportunities.csv</a> |
+<a href="/opportunities/export?file=competitor_comparison.csv">competitor_comparison.csv</a> |
+<a href="/opportunities/export?file=content_gaps.csv">content_gaps.csv</a></p>
+{% endblock %}

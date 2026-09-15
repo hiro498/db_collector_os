@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Competitor Comparison{% endblock %}
+{% block content %}
+<h1>Competitor Comparison</h1>
+<p><a href="/opportunities">&larr; Opportunities一覧に戻る</a></p>
+<p>
+  <strong>Left:</strong> {{ page_a.url if page_a else "-" }}<br>
+  <strong>Right:</strong> {{ page_b.url if page_b else "-" }}
+</p>
+<table>
+<thead><tr><th>Dimension</th><th>Left</th><th>Right</th><th>Gap</th><th>Winner</th><th>Confidence</th></tr></thead>
+<tbody>
+{% for c in comparisons %}
+<tr>
+  <td>{{ c.comparison_dimension }}</td>
+  <td>{{ "Not Observed" if c.left_value is none else c.left_value }}</td>
+  <td>{{ "Not Observed" if c.right_value is none else c.right_value }}</td>
+  <td>{{ "Not Observed" if c.gap_value is none else c.gap_value }}</td>
+  <td>{{ c.winner }}</td>
+  <td>{{ c.confidence }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">比較データはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

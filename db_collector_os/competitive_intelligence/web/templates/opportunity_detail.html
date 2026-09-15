@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Opportunity Detail{% endblock %}
+{% block content %}
+<h1>Opportunity Detail <span class="muted">({{ analysis.entity_type }})</span></h1>
+<p><a href="/opportunities">&larr; Opportunities一覧に戻る</a></p>
+<p class="muted">
+query={{ analysis.query or "-" }} / our_page_id={{ analysis.our_page_id or "-" }} /
+score_status={{ analysis.score_status }} / confidence={{ analysis.confidence_label }} ({{ analysis.confidence_value }})
+</p>
+
+<div class="cards">
+<div class="card"><div class="value">{{ "Not Observed" if analysis.overall_opportunity_score is none else analysis.overall_opportunity_score }}</div><div class="label">Overall Opportunity</div></div>
+<div class="card"><div class="value">{{ analysis.confidence_label }}</div><div class="label">Confidence</div></div>
+<div class="card"><div class="value">{{ "Not Observed" if analysis.ai_opportunity_score is none else analysis.ai_opportunity_score }}</div><div class="label">AI Opportunity</div></div>
+<div class="card"><div class="value">{{ "Not Observed" if analysis.fanout_opportunity_score is none else analysis.fanout_opportunity_score }}</div><div class="label">Fan-out Opportunity</div></div>
+<div class="card"><div class="value">{{ "Not Observed" if analysis.content_gap_score is none else analysis.content_gap_score }}</div><div class="label">Content Gap</div></div>
+<div class="card"><div class="value">{{ "Not Observed" if analysis.commercial_opportunity_score is none else analysis.commercial_opportunity_score }}</div><div class="label">Commercial</div></div>
+</div>
+
+<p class="muted">
+Organic Rank: {{ "Not Observed" if analysis.our_rank is none else analysis.our_rank }} /
+Best Competitor Rank: {{ "Not Observed" if analysis.best_competitor_rank is none else analysis.best_competitor_rank }} /
+Rank Gap: {{ "Not Observed" if analysis.rank_gap is none else analysis.rank_gap }} /
+Organic/AI Divergence: {{ analysis.organic_ai_divergence_class or "Not Observed" }}
+{% if analysis.best_competitor_page_id %}/ <a href="/opportunities/compare?a={{ analysis.our_page_id }}&b={{ analysis.best_competitor_page_id }}">Compare vs best competitor</a>{% endif %}
+</p>
+
+<h2>Component Scores</h2>
+<table>
+<thead><tr><th>Component</th><th>Value</th><th>Weight</th><th>Availability</th><th>Evidence</th></tr></thead>
+<tbody>
+{% for c in components %}
+<tr>
+  <td>{{ c.component_name }}</td>
+  <td>{{ "Not Observed" if c.value is none else c.value }}</td>
+  <td>{{ "%.2f"|format(c.weight) }}</td>
+  <td>{{ c.availability }}</td>
+  <td class="muted">{{ c.evidence }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Reasons</h2>
+<table>
+<thead><tr><th>Reason Code</th><th>Text</th><th>Impact</th><th>Evidence</th></tr></thead>
+<tbody>
+{% for r in reasons %}
+<tr><td>{{ r.reason_code }}</td><td>{{ r.reason_text }}</td><td>{{ r.impact_score }}</td><td class="muted">{{ r.evidence_reference }}</td></tr>
+{% else %}
+<tr><td colspan="4" class="muted">検出された理由はありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Recommended Actions</h2>
+<table>
+<thead><tr><th>Action</th><th>Priority</th><th>Reason</th><th>Target Page</th><th>Target Keyword</th></tr></thead>
+<tbody>
+{% for a in actions %}
+<tr><td>{{ a.action_code }}</td><td>{{ a.priority }}</td><td>{{ a.reason_code or "-" }}</td><td>{{ a.target_page or "-" }}</td><td>{{ a.target_keyword or "-" }}</td></tr>
+{% else %}
+<tr><td colspan="5" class="muted">推奨アクションはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Content Gaps vs Competitors</h2>
+<table>
+<thead><tr><th>Competitor Page</th><th>Score</th><th>Missing Keywords</th><th>Missing Subtopics</th><th>Missing Numeric Facts</th></tr></thead>
+<tbody>
+{% for g in content_gaps %}
+<tr>
+  <td>{{ g.competitor_page_id }}</td>
+  <td>{{ g.content_gap_score }}</td>
+  <td class="muted">{{ g.missing_keywords_json }}</td>
+  <td class="muted">{{ g.missing_subtopics_json }}</td>
+  <td class="muted">{{ g.missing_numeric_facts_json }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="muted">Content Gapデータはありません。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

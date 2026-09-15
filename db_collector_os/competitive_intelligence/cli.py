@@ -262,6 +262,112 @@ def observe_fanout(ctx: click.Context, query: str, country: str | None, language
     _observe_common(ctx, "fanout", query, country, language, device)
 
 
+@ci.group("opportunity")
+def opportunity() -> None:
+    """PHASE 14: Opportunity Score / Cross-Competitor Comparison."""
+
+
+@opportunity.command("keyword")
+@click.argument("keyword_id")
+@click.option("--our-page", "our_page_id", required=True, help="The page_id this keyword's opportunity is evaluated from.")
+@click.option("--competitor", "competitors", multiple=True, help="Explicit competitor page_id(s); auto-derived if omitted.")
+@click.pass_context
+def opportunity_keyword(ctx: click.Context, keyword_id: str, our_page_id: str, competitors: tuple[str, ...]) -> None:
+    """Compute Keyword Opportunity. `--our-page` is required and never
+    silently guessed -- see opportunity/pipeline.py's module docstring."""
+    result = service.compute_keyword_opportunity(
+        ctx.obj["config"], keyword_id, our_page_id, list(competitors) or None,
+    )
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("page")
+@click.argument("page_id")
+@click.option("--competitor", "competitors", multiple=True, help="Explicit competitor page_id(s); auto-derived if omitted.")
+@click.pass_context
+def opportunity_page(ctx: click.Context, page_id: str, competitors: tuple[str, ...]) -> None:
+    result = service.compute_page_opportunity(ctx.obj["config"], page_id, list(competitors) or None)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("compare")
+@click.argument("page_id_a")
+@click.argument("page_id_b")
+@click.pass_context
+def opportunity_compare(ctx: click.Context, page_id_a: str, page_id_b: str) -> None:
+    result = service.compare_pages(ctx.obj["config"], page_id_a, page_id_b)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("compare-domains")
+@click.argument("domain_id_a")
+@click.argument("domain_id_b")
+@click.pass_context
+def opportunity_compare_domains(ctx: click.Context, domain_id_a: str, domain_id_b: str) -> None:
+    result = service.compare_domains(ctx.obj["config"], domain_id_a, domain_id_b)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("compare-keywords")
+@click.argument("keyword_id_a")
+@click.argument("keyword_id_b")
+@click.pass_context
+def opportunity_compare_keywords(ctx: click.Context, keyword_id_a: str, keyword_id_b: str) -> None:
+    result = service.compare_keywords(ctx.obj["config"], keyword_id_a, keyword_id_b)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("list")
+@click.option("--entity-type", default=None, type=click.Choice(["page", "keyword"]))
+@click.option("--limit", default=50, type=int)
+@click.option("--min-commercial", default=None, type=float)
+@click.option("--min-ai-gap", default=None, type=float)
+@click.option("--min-content-gap", default=None, type=float)
+@click.option("--min-confidence", default=None, type=float)
+@click.pass_context
+def opportunity_list(
+    ctx: click.Context, entity_type: str | None, limit: int, min_commercial: float | None,
+    min_ai_gap: float | None, min_content_gap: float | None, min_confidence: float | None,
+) -> None:
+    """Lists Opportunity analyses, sorted by overall_opportunity_score DESC."""
+    rows = service.list_opportunities(
+        ctx.obj["config"], entity_type=entity_type, limit=limit, min_commercial=min_commercial,
+        min_ai_gap=min_ai_gap, min_content_gap=min_content_gap, min_confidence=min_confidence,
+    )
+    for row in rows:
+        click.echo(
+            f"{row['opportunity_id']:20} type={row['entity_type']:8} overall={row['overall_opportunity_score']!s:8} "
+            f"status={row['score_status']:16} confidence={row['confidence_label']:8} "
+            f"query={row['query'] or '-'}"
+        )
+
+
+@opportunity.command("recompute")
+@click.option("--run-id", "crawl_run_id", default=None, help="Limit to one crawl_run_id; recomputes all analysis-target pages/keywords otherwise.")
+@click.pass_context
+def opportunity_recompute(ctx: click.Context, crawl_run_id: str | None) -> None:
+    result = service.recompute_all_opportunities(ctx.obj["config"], crawl_run_id)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("import-demand")
+@click.argument("file_path")
+@click.pass_context
+def opportunity_import_demand(ctx: click.Context, file_path: str) -> None:
+    """Offline JSON/CSV import of keyword demand metrics (spec section 16)."""
+    result = service.import_keyword_metrics(ctx.obj["config"], file_path)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+@opportunity.command("export")
+@click.option("--out-dir", default="./var/opportunity_exports")
+@click.pass_context
+def opportunity_export(ctx: click.Context, out_dir: str) -> None:
+    paths = service.export_opportunity_csv(ctx.obj["config"], out_dir)
+    for path in paths:
+        click.echo(path)
+
+
 @ci.group("web")
 def web() -> None:
     """Competitive Intelligence Web Dashboard process."""
