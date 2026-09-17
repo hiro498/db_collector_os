@@ -222,7 +222,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="入力カテゴリJSON (default: %(default)s)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="出力先JSON (default: %(default)s)")
-    parser.add_argument("--model", default="gemini-2.5-flash", help="Geminiモデル名 (default: %(default)s)")
+    parser.add_argument("--model", default="gemini-3.6-flash", help="Geminiモデル名 (default: %(default)s)")
     parser.add_argument("--limit", type=int, default=None, help="先頭N件のカテゴリのみ処理（動作確認用）")
     parser.add_argument("--sleep", type=float, default=2.0, help="カテゴリ間の待機秒数 (default: %(default)s)")
     parser.add_argument("--retries", type=int, default=3, help="1カテゴリあたりの最大リトライ回数 (default: %(default)s)")

@@ -70,7 +70,7 @@ python3 topic_clusters/generate_clusters.py
 | --- | --- |
 | `--input PATH` | 入力JSON（デフォルト: `categories_input.json`） |
 | `--output PATH` | 出力先JSON（デフォルト: `output/topic_clusters.json`） |
-| `--model NAME` | Geminiモデル名（デフォルト: `gemini-2.5-flash`） |
+| `--model NAME` | Geminiモデル名（デフォルト: `gemini-3.6-flash`。`gemini-2.5-flash`は新規ユーザー向けには提供終了済み） |
 | `--limit N` | 先頭N件のカテゴリのみ処理 |
 | `--sleep SEC` | カテゴリ間の待機秒数（デフォルト: 2.0） |
 | `--retries N` | 1カテゴリあたりの最大リトライ回数（デフォルト: 3） |
